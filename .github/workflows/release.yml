@@ -1,0 +1,51 @@
+# Pushing a tag such as v1.0.0 builds the Linux binary and the web bundle and
+# publishes them as a GitHub release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config zip libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build Linux binary
+        run: cargo build --release --locked -p pd-native
+
+      - name: Build web bundle
+        run: web/build.sh
+
+      - name: Package
+        run: |
+          name="punky-duck-${GITHUB_REF_NAME}"
+          mkdir -p "dist/${name}-linux-x86_64"
+          cp target/release/pd-native README.md LICENSE "dist/${name}-linux-x86_64/"
+          tar -C dist -czf "dist/${name}-linux-x86_64.tar.gz" "${name}-linux-x86_64"
+          (cd web && zip -9 -X "../dist/${name}-web.zip" index.html style.css main.js pkg/pd_web.js pkg/pd_web_bg.wasm)
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/*.zip \
+            --title "Punky Duck ${GITHUB_REF_NAME}" --generate-notes --verify-tag
