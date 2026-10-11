@@ -68,3 +68,42 @@ fn original_mode_ignores_modern_input() {
     sim.frame(&SimInput::default(), 4);
     assert_eq!((sim.s.p.angle, sim.s.p.px, sim.s.p.pz, sim.s.p.weapon), (a0, 0, 0, 0));
 }
+
+#[test]
+fn strafing_over_water_is_an_enhancement() {
+    let run = |enh: Enhancements, flying: i32| {
+        let mut sim = flat(enh);
+        sim.terrain.zone.fill(1);
+        sim.s.p.flying = flying;
+        sim.s.p.fuel = 4000;
+        for _ in 0..10 {
+            sim.modern = ModernInput { strafe_left: true, ..Default::default() };
+            sim.frame(&SimInput::default(), 4);
+        }
+        (sim.s.p.px, sim.s.p.pz)
+    };
+    for flying in [0, 1] {
+        assert_eq!(run(modern(), flying), (0, 0), "original rule, flying {flying}");
+        assert_ne!(run(Enhancements { strafe_in_water: true, ..modern() }, flying), (0, 0), "flying {flying}");
+    }
+}
+
+#[test]
+fn safe_spawn_holds_the_monsters_off_for_five_seconds() {
+    use pd_game::settings::SPAWN_GRACE_TICKS;
+    let mut sim = flat(Enhancements { safe_spawn: true, ..Enhancements::original() });
+    sim.continue_game(); // any of the three moments the duck appears
+    assert_eq!(sim.grace, SPAWN_GRACE_TICKS);
+    sim.frame(&SimInput::default(), 77); // the frame that waited for the fade
+    assert_eq!(sim.grace, SPAWN_GRACE_TICKS - 8);
+    for _ in 0..40 {
+        sim.frame(&SimInput::default(), 4);
+    }
+    assert!(sim.grace > 0);
+    sim.frame(&SimInput { fire: true, ..Default::default() }, 4);
+    assert_eq!(sim.grace, 0, "firing ends it");
+
+    let mut sim = flat(Enhancements::original());
+    sim.continue_game();
+    assert_eq!(sim.grace, 0);
+}

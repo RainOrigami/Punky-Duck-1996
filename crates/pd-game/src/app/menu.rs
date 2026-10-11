@@ -6,6 +6,8 @@
 //! The original loop is not throttled; its pass rate on the reference
 //! machine (DOSBox-X, `docs/re/reference.md`) is 33 retraces per 8 passes.
 
+use std::cell::Cell;
+
 use pd_formats::stp::{DIFFICULTIES, LANGUAGES};
 
 use super::core::{Core, Picture};
@@ -109,7 +111,22 @@ pub struct Menu {
     quit: u8,
     /// The page loop of the top-level function has ended.
     done: bool,
+    /// Entries as last drawn, for the mouse: screen row of the middle of the
+    /// first entry and their number (`Enhancements::menu_mouse`).
+    layout: Cell<Option<(i32, i32)>>,
+    /// Pointer position at the previous pass.
+    mouse_prev: Cell<Option<(i32, i32)>>,
+    /// Bit n: entry n of the page being read is a slider.
+    sliders: Cell<u32>,
+    /// The key just read was Esc (before `menu_input` turned it into Enter).
+    esc: Cell<bool>,
 }
+
+/// Height of one menu entry and half the width of the box, in pixels.
+const ROW_H: i32 = 0x28;
+const BOX_HALF_W: i32 = 200;
+/// Prefixes of the level-select phrase that end in a space.
+const CHEAT_SPACES: [usize; 4] = [4, 10, 13, 17];
 
 fn cycle(value: &mut u32, n: u32) {
     // 0x25e60 with direction +1.
@@ -128,14 +145,29 @@ fn name_of<'a>(names: &[&'a [u8]], index: u32) -> &'a [u8] {
 impl Menu {
     /// The main menu (`menu_run` after its set-up, `0x25ed0`).
     pub fn main(bg: Picture) -> Self {
-        Self { pages: vec![Page::Main { sel: 0 }], phase: 0, bg, out: Outcome::default(), quit: 0, done: false }
+        Self::with_page(Page::Main { sel: 0 }, bg)
     }
 
     /// The game-over screen (`0x255f0`, lives below zero): `GO_n.RON`, then
     /// either a wait for a key or the continue countdown.
     pub fn game_over(bg: Picture, continues: i32) -> Self {
         let page = if continues == 0 { Page::GameOverWait { sel: 0 } } else { Page::Continue { sel: 0, count: 599 } };
-        Self { pages: vec![page], phase: 0, bg, out: Outcome::default(), quit: 0, done: false }
+        Self::with_page(page, bg)
+    }
+
+    fn with_page(page: Page, bg: Picture) -> Self {
+        Self {
+            pages: vec![page],
+            phase: 0,
+            bg,
+            out: Outcome::default(),
+            quit: 0,
+            done: false,
+            layout: Cell::new(None),
+            mouse_prev: Cell::new(None),
+            sliders: Cell::new(0),
+            esc: Cell::new(false),
+        }
     }
 
     pub fn is_done(&self) -> bool {
@@ -160,6 +192,42 @@ impl Menu {
             }
         }
         core.video.present();
+        // Where the entries are, from the glyph box of the font.
+        let middle = font.glyph(b'A').map_or(0, |i| item_sheet.middle_row(i));
+        self.layout.set((sel >= 0).then_some((top + 0x168 + middle, items.len() as i32)));
+    }
+
+    /// The pointer and its buttons as keys (`Enhancements::menu_mouse`).
+    fn mouse_key(&self, core: &mut Core, sel: &mut i32, count: i32) -> Option<BiosKey> {
+        let pos = (core.input.mouse_x, core.input.mouse_y);
+        let moved = self.mouse_prev.replace(Some(pos)).is_some_and(|p| p != pos);
+        let (left, right) = std::mem::take(&mut core.clicks);
+        let hover = self.layout.get().and_then(|(y0, n)| {
+            let row = (pos.1 - (y0 - ROW_H / 2)).div_euclid(ROW_H);
+            ((pos.0 - 0x140).abs() <= BOX_HALF_W && (0..n.min(count)).contains(&row)).then_some(row)
+        });
+        if let (true, Some(row)) = (moved, hover) {
+            if *sel != row {
+                *sel = row;
+                core.sound.play(SFX_MOVE, 0xff);
+            }
+        }
+        if right {
+            return Some(BiosKey { ascii: 0x1b, scan: 0x01 });
+        }
+        if !left {
+            return None;
+        }
+        if count <= 1 {
+            // Name entry and the game-over picture: a click confirms.
+            return Some(BiosKey { ascii: 0x0d, scan: 0x1c });
+        }
+        let row = hover?;
+        *sel = row;
+        if self.sliders.get() & (1 << row) != 0 {
+            return Some(BiosKey { ascii: 0, scan: if pos.0 < 0x140 { 0x4b } else { 0x4d } });
+        }
+        Some(BiosKey { ascii: 0x0d, scan: 0x1c })
     }
 
     /// The picture alone (game over without continues, `0x25700`).
@@ -177,6 +245,35 @@ impl Menu {
         if key.ascii as u32 + key.scan as u32 != 0 {
             core.kbd.flush();
         }
+        if core.enh.menu_mouse {
+            if let Some(k) = self.mouse_key(core, sel, count) {
+                key = k;
+            }
+        }
+        // What the cheat buffer gets when the key itself is turned into another one.
+        let mut typed = None;
+        if core.enh.menu_wasd_space && count != 0 {
+            let as_key = match key.ascii {
+                b'w' => Some(BiosKey { ascii: 0, scan: 0x48 }),
+                b's' => Some(BiosKey { ascii: 0, scan: 0x50 }),
+                b'a' => Some(BiosKey { ascii: 0, scan: 0x4b }),
+                b'd' => Some(BiosKey { ascii: 0, scan: 0x4d }),
+                b' ' => {
+                    // A space that continues the level-select phrase stays text.
+                    let mut buf = g.cheat_buf;
+                    buf.copy_within(1.., 0);
+                    buf[21] = b' ';
+                    let in_phrase = CHEAT_SPACES.iter().any(|&n| buf.ends_with(&CHEAT_PHRASE[..n]));
+                    (!in_phrase || g.cheat).then_some(BiosKey { ascii: 0x0d, scan: 0x1c })
+                }
+                _ => None,
+            };
+            if let Some(k) = as_key {
+                typed = Some(key.ascii);
+                key = k;
+            }
+        }
+        self.esc.set(key.ascii == 0x1b);
         if key.scan == 0x48 {
             *sel -= 1;
         }
@@ -202,9 +299,10 @@ impl Menu {
         if key.ascii == 0x0d {
             core.sound.play(SFX_SELECT, 0xff);
         }
-        if key.ascii != 0 && !g.cheat {
+        let typed = typed.unwrap_or(key.ascii);
+        if typed != 0 && !g.cheat {
             g.cheat_buf.copy_within(1.., 0);
-            g.cheat_buf[21] = key.ascii;
+            g.cheat_buf[21] = typed;
             if &g.cheat_buf == CHEAT_PHRASE {
                 g.cheat = true;
                 core.note("cheat");
@@ -279,12 +377,15 @@ impl Menu {
         let mut push: Option<Page> = None;
         // The page returned without a pass of its own: run the caller's now.
         let mut again = false;
+        self.sliders.set(0);
         match &mut page {
             Page::Main { sel } => {
                 self.draw_main(core, g, *sel);
                 let count = if g.in_progress { 6 } else { 4 };
                 let key = self.input(core, g, sel, count);
-                if key.ascii == 0x0d {
+                if core.enh.menu_esc_resumes && g.in_progress && self.esc.get() {
+                    self.out.resume = true;
+                } else if key.ascii == 0x0d {
                     let choice = match (g.in_progress, *sel) {
                         (_, 0) => 0,
                         (_, 1) => 1,
@@ -481,6 +582,7 @@ impl Menu {
                     b"RETURN",
                 ];
                 self.draw(core, g, b"OPTIONS", &items, *sel);
+                self.sliders.set(1 << 2);
                 let key = self.input(core, g, sel, 7);
                 let stp = &mut core.settings.stp;
                 if key.ascii == 0 {
@@ -547,6 +649,7 @@ impl Menu {
                 let items: [&[u8]; 5] =
                     [name_of(&SOUND_NAMES, stp.sound_on), name_of(&MUSIC_NAMES, stp.music_on), &sfx, &cd, b"RETURN"];
                 self.draw(core, g, b"SOUND AND MUSIC", &items, *sel);
+                self.sliders.set(1 << 2 | 1 << 3);
                 let key = self.input(core, g, sel, 5);
                 let before = core.settings.stp;
                 let stp = &mut core.settings.stp;
@@ -590,11 +693,33 @@ impl Menu {
                 }
             }
             Page::Controller { sel } => {
-                let items: [&[u8]; 3] =
-                    [name_of(&CONTROLLERS, core.settings.stp.controller), b"CALIBRATE JOYSTICK", b"RETURN"];
+                // The modern controls add MOUSE SPEED before RETURN.
+                let mouse = core.enh.modern_controls;
+                let mut bar = *b"MOUSE SPEED : ,,,,,,,,,,,,,,,,";
+                for (i, c) in bar[14..].iter_mut().enumerate() {
+                    *c = if i as u32 <= core.settings.mouse_speed { b'+' } else { b'*' };
+                }
+                let mut items: Vec<&[u8]> = vec![name_of(&CONTROLLERS, core.settings.stp.controller), b"CALIBRATE JOYSTICK"];
+                if mouse {
+                    items.push(&bar);
+                    self.sliders.set(1 << 2);
+                }
+                items.push(b"RETURN");
+                let count = items.len() as i32;
                 self.draw(core, g, b"CONTROLLER", &items, *sel);
-                let key = self.input(core, g, sel, 3);
-                if key.ascii == 0x0d {
+                let key = self.input(core, g, sel, count);
+                let speed = &mut core.settings.mouse_speed;
+                if mouse && *sel == 2 {
+                    if key.ascii == 0 {
+                        if key.scan == 0x4b && *speed != 0 {
+                            *speed -= 1;
+                        } else if key.scan == 0x4d && *speed < 0xf {
+                            *speed += 1;
+                        }
+                    } else if key.ascii == 0x0d {
+                        *speed = (*speed + 1) & 0xf;
+                    }
+                } else if key.ascii == 0x0d {
                     match *sel {
                         0 => cycle(&mut core.settings.stp.controller, 2),
                         1 => {
@@ -605,7 +730,7 @@ impl Menu {
                                 shown: false,
                             });
                         }
-                        2 => {
+                        n if n == count - 1 => {
                             keep = false;
                             // 0x26c50: no joystick (0x4193c set) -> back to keyboard.
                             core.settings.stp.controller = 0;

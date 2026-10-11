@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Punky Duck</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=dev">
 </head>
 <body>
 <main id="stage">
@@ -18,6 +18,21 @@
     <p class="fine">No disc at hand? The CD image is archived at the Internet Archive:
       <a href="https://archive.org/details/punky-duck" target="_blank" rel="noopener">archive.org/details/punky-duck</a>.
       Download the <code>.bin</code> and <code>.cue</code> from there, then drop them here.</p>
+    <fieldset id="versions">
+      <legend>Version</legend>
+      <div class="choices">
+        <label class="choice"><input type="radio" name="mode" value="original">
+          <span><b>Original</b><small>As released in 1996, bugs included</small></span></label>
+        <label class="choice"><input type="radio" name="mode" value="enhanced">
+          <span><b>Enhanced</b><small>Modern controls, smoother picture, bug fixes</small></span></label>
+      </div>
+      <details id="custom">
+        <summary>Choose enhancements <span id="custom-count"></span></summary>
+        <div id="flags"></div>
+        <p class="flagbtns"><button type="button" class="helpbtn" id="flags-all">All on</button>
+          <button type="button" class="helpbtn" id="flags-none">All off</button></p>
+      </details>
+    </fieldset>
     <label id="drop" for="files">
       <span class="slots">
         <span class="slot" id="slot-bin" data-ext=".bin">no .bin yet</span>
@@ -26,11 +41,6 @@
       <span class="hint">Drop both files here, or click to choose</span>
       <input id="files" type="file" multiple accept=".bin,.cue,.BIN,.CUE">
     </label>
-    <p class="fine"><label>Version:
-      <select id="mode">
-        <option value="original">Original (as released, bugs included)</option>
-        <option value="enhanced">Enhanced (fixes and improvements)</option>
-      </select></label></p>
     <p class="fine"><button class="helpbtn" type="button" data-help>Controls, options and cheats</button></p>
     <p class="fine">The files are read in this tab and never leave your computer. The image
       (about 127&nbsp;MB) is held in memory while the page is open.</p>
@@ -56,7 +66,9 @@
   <div class="helpbody">
 
   <h3>Versions</h3>
-  <p>Choose the version before loading the disc. The choice is remembered.</p>
+  <p>Choose the version before loading the disc. The choice is remembered. Under
+    <b>Choose enhancements</b> each improvement of the enhanced version can be switched off
+    on its own; any combination works.</p>
   <dl>
     <dt>Original</dt>
     <dd>Behaves like the 1996 DOS release, bugs included. As on the original disc, finishing
@@ -64,10 +76,12 @@
       select cheat below or from a saved game.</dd>
     <dt>Enhanced</dt>
     <dd>Modern controls (mouse look, WASD with strafing, fire on the left mouse button, number
-      keys for weapons) and fixes for the original's bugs: finishing island 1 leads on to
+      keys for weapons), a smoothly drawn view that reaches four times as far, a minimap, menus that take the mouse, and fixes
+      for the original's bugs: finishing island 1 leads on to
       island 2, the compass survives loading and resuming, monsters keep to their patrol
       paths, hits are scored by the weapon that fired, spent shots stop hurting monsters, a
-      death costs one life instead of sometimes two, the fifth teleporter pad on islands 3 and
+      death costs one life instead of sometimes two, monsters leave you alone for the first
+      seconds after you appear, the fifth teleporter pad on islands 3 and
       4 works, and the full picture is shown.</dd>
   </dl>
 
@@ -80,7 +94,7 @@
       <tr><td>Strafe</td><td>Hold <kbd>Ctrl</kbd> and turn</td><td><kbd>A</kbd> <kbd>D</kbd></td></tr>
       <tr><td>Fire</td><td><kbd>Space</kbd></td><td>Left mouse button or <kbd>Space</kbd></td></tr>
       <tr><td>Choose weapon</td><td><kbd>Backspace</kbd> (next)</td><td><kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd> directly, or <kbd>Backspace</kbd> (next)</td></tr>
-      <tr><td>Jetpack on / off</td><td><kbd>Enter</kbd></td><td><kbd>Enter</kbd></td></tr>
+      <tr><td>Jetpack on / off</td><td><kbd>Enter</kbd></td><td><kbd>E</kbd> or <kbd>Enter</kbd></td></tr>
       <tr><td>Map</td><td><kbd>Tab</kbd></td><td><kbd>Tab</kbd></td></tr>
       <tr><td>Inventory</td><td><kbd>Home</kbd>, <kbd>End</kbd>, <kbd>PgUp</kbd>, <kbd>PgDn</kbd>, <kbd>Ins</kbd> or <kbd>Del</kbd></td><td>same</td></tr>
       <tr><td>Quest pictures</td><td><kbd>1</kbd> <kbd>2</kbd></td><td><kbd>F3</kbd> <kbd>F4</kbd></td></tr>
@@ -90,20 +104,26 @@
       <tr><td>Game menu (save, load, options)</td><td><kbd>Esc</kbd></td><td><kbd>Esc</kbd></td></tr>
     </tbody>
   </table>
-  <p>In the enhanced version, click the picture once to let the mouse steer; the pointer is
-    released again in menus and other screens, or with the browser's <kbd>Esc</kbd>.</p>
+  <p>In the enhanced version, click the picture once to let the mouse steer (that click does
+    not fire); the pointer is
+    released again in the menus and the shop. How fast the mouse turns is set with
+    <b>MOUSE SPEED</b> under OPTIONS, CONTROLLER OPTIONS.</p>
   <p>The map fills in as you explore. Your heading is only shown once you have found the
-    compass.</p>
+    compass. The enhanced version also shows the explored surroundings in a small map at the
+    top right of the view.</p>
 
   <h3>Menus, shop and other screens</h3>
   <table>
+    <thead><tr><th>Action</th><th>Original</th><th>Enhanced adds</th></tr></thead>
     <tbody>
-      <tr><td>Move, choose</td><td><kbd>Up</kbd> <kbd>Down</kbd>, <kbd>Enter</kbd></td></tr>
-      <tr><td>Change a slider</td><td><kbd>Left</kbd> <kbd>Right</kbd></td></tr>
-      <tr><td>Back (picks the last entry)</td><td><kbd>Esc</kbd></td></tr>
-      <tr><td>Name a saved game</td><td>Type it, then <kbd>Enter</kbd></td></tr>
-      <tr><td>Shop</td><td>Move the hand with the arrow keys, pick with <kbd>Space</kbd></td></tr>
-      <tr><td>Skip the intro movies</td><td>Any key</td></tr>
+      <tr><td>Move, choose</td><td><kbd>Up</kbd> <kbd>Down</kbd>, <kbd>Enter</kbd></td><td><kbd>W</kbd> <kbd>S</kbd>, <kbd>Space</kbd>; or point and click</td></tr>
+      <tr><td>Change a slider</td><td><kbd>Left</kbd> <kbd>Right</kbd></td><td><kbd>A</kbd> <kbd>D</kbd>; or click its left or right half</td></tr>
+      <tr><td>Back (picks the last entry)</td><td><kbd>Esc</kbd></td><td>Right mouse button</td></tr>
+      <tr><td>Main menu during a game</td><td><kbd>Esc</kbd> goes to EXIT</td><td><kbd>Esc</kbd> returns to the game</td></tr>
+      <tr><td>Name a saved game</td><td>Type it, then <kbd>Enter</kbd></td><td></td></tr>
+      <tr><td>Pictures, dialogue, map</td><td>Any game key ends them</td><td>Only <kbd>Space</kbd>, <kbd>Enter</kbd>, <kbd>Tab</kbd> or a click</td></tr>
+      <tr><td>Shop</td><td>Move the hand with the arrow keys, pick with <kbd>Space</kbd>, leave with <kbd>Esc</kbd></td><td>The hand follows the mouse; click to pick, right button to leave</td></tr>
+      <tr><td>Skip the intro movies</td><td>Any key</td><td></td></tr>
     </tbody>
   </table>
 
@@ -115,7 +135,7 @@
       <tr><td>Game speed</td><td>−6 to +6</td></tr>
       <tr><td>Resolution</td><td>VGA 320×200, SVGA 320×200, SVGA 640×400; fast mode on / off</td></tr>
       <tr><td>Sound</td><td>Sound effects and music on / off, a volume for each</td></tr>
-      <tr><td>Controller</td><td>Keyboard or joystick</td></tr>
+      <tr><td>Controller</td><td>Keyboard or joystick; mouse speed (enhanced version)</td></tr>
     </tbody>
   </table>
   <p>Options and saved games are kept in this browser's storage. They use the DOS game's own
@@ -165,6 +185,6 @@
   </div>
 </dialog>
 
-<script type="module" src="main.js"></script>
+<script type="module" src="main.js?v=dev"></script>
 </body>
 </html>

@@ -39,6 +39,9 @@ OPTIONS:
     --exit-after <secs>   quit after this many seconds
     --original            original behaviour, bugs included (default; remembered)
     --enhanced            fixes and improvements on (remembered)
+    --without <names>     with --enhanced: leave these improvements off (field
+                          names of Enhancements, comma separated; remembered;
+                          an empty list for none). --list-enhancements prints them.
     --no-intro            skip INTRO.EXE's movies
     --no-credits          skip THE_END.EXE's credits after EXIT
     --frame-ticks <n>     70 Hz ticks per rendered island frame (default 4;
@@ -74,6 +77,9 @@ KEYS (the original's; see docs/re/engine/input.md):
     Esc            cancel        F1 / F2    view / interlace
     P              pause         1, 2, Home..Del
     Ctrl, Space, Enter, Esc or a click skip movies.
+  With --enhanced: mouse turns, A / D strafe, left button fires, 1-9, 0 choose
+    the weapon, E jetpack, F3 / F4 quest pictures; the menus take the mouse,
+    W / S / A / D and Space; Esc in the main menu returns to the game.
 ";
 
 #[derive(Default)]
@@ -93,6 +99,7 @@ struct Cli {
     no_intro: bool,
     no_credits: bool,
     frame_ticks: Option<u32>,
+    without: Option<String>,
     storage: Option<PathBuf>,
     demo: bool,
     headless: bool,
@@ -123,6 +130,13 @@ fn parse_cli() -> Result<Cli, String> {
             "--seconds" => cli.seconds = value("seconds")?.parse().map_err(|_| "--seconds: not a number")?,
             "--original" => cli.mode = Some(pd_game::app::Mode::Original),
             "--enhanced" => cli.mode = Some(pd_game::app::Mode::Enhanced),
+            "--without" => cli.without = Some(value("a list of names")?),
+            "--list-enhancements" => {
+                for (name, group, text) in pd_game::settings::FLAGS {
+                    println!("{name:32}{group:11}{text}");
+                }
+                std::process::exit(0);
+            }
             "--no-intro" => cli.no_intro = true,
             "--no-credits" => cli.no_credits = true,
             "--frame-ticks" => {
@@ -322,7 +336,15 @@ fn run() -> Result<(), String> {
             opts.frame_ticks = n.max(1);
         }
         eprintln!("pd-native: {} mode, {} ticks per island frame", mode.name(), opts.frame_ticks);
-        let game = Game::new(assets, storage, opts);
+        if let Some(names) = &cli.without {
+            pd_game::app::store::store_disabled_flags(storage.as_mut(), names);
+        }
+        let enh = mode.stored_enhancements(storage.as_ref());
+        let off = pd_game::app::store::disabled_flags(storage.as_ref());
+        if mode == pd_game::app::Mode::Enhanced && !off.is_empty() {
+            eprintln!("pd-native: without {}", off.join(", "));
+        }
+        let game = Game::with_enhancements(assets, storage, opts, enh);
         for e in game.errors() {
             eprintln!("pd-native: {e}");
         }

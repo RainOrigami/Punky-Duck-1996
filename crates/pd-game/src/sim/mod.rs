@@ -309,6 +309,9 @@ pub struct ModernInput {
 pub struct Sim {
     /// See [`ModernInput`].
     pub modern: ModernInput,
+    /// 70 Hz ticks for which the monsters still ignore the duck
+    /// ([`Enhancements::safe_spawn`]). Not part of a saved game.
+    pub grace: i32,
     pub s: State,
     pub terrain: Terrain,
     /// `MONSTERn.TRJ` of the current island.
@@ -344,6 +347,7 @@ impl Sim {
     pub fn new(enh: Enhancements) -> Self {
         Sim {
             modern: ModernInput::default(),
+            grace: 0,
             s: State::default(),
             terrain: Terrain::default(),
             monster_trj: empty_trj(),
@@ -354,6 +358,17 @@ impl Sim {
             input: SimInput::default(),
             cluster_edi: None,
         }
+    }
+
+    /// Distance up to which scenery, pickups and quest items are queued for drawing
+    /// (4500 in the original, the edge of its ground window).
+    pub(crate) fn draw_range(&self) -> i32 {
+        if self.enh.far_view { crate::settings::FAR_VIEW_CELLS * terrain::CELL } else { 4500 }
+    }
+
+    /// The duck has just appeared somewhere: start the truce of `safe_spawn`.
+    pub(crate) fn start_grace(&mut self) {
+        self.grace = if self.enh.safe_spawn { crate::settings::SPAWN_GRACE_TICKS } else { 0 };
     }
 
     pub fn drain_events(&mut self) -> Vec<Event> {
@@ -428,6 +443,7 @@ impl Sim {
         self.s.sprite_tables = tables::MONSTER_SPRITES[k];
         self.island_transient_reset();
         self.island_start(bonus_trj);
+        self.start_grace();
     }
 
     /// Gameplay effects of the island asset function (`0x174c0` and siblings), which
@@ -485,6 +501,7 @@ impl Sim {
         self.s.p.energy = 99;
         self.s.p.lives = 3;
         self.s.p.continues -= 1;
+        self.start_grace();
     }
 
     /// One rendered frame with `ticks + 1` steps (`frame_common` + `island_frame` +
@@ -498,6 +515,8 @@ impl Sim {
             self.modern = ModernInput::default();
         }
         self.s.p.ticks = ticks;
+        // A frame that waited for a fade counts as a normal one.
+        self.grace = (self.grace - ticks.min(8)).max(0);
         for _ in 0..=ticks {
             self.step(&inp);
         }

@@ -6,8 +6,8 @@
 
 use super::raster::{PITCH, Target, Texture, tri_fog, tri_textured};
 use super::{
-    Anchor, BORDER_COLOUR, CELL, FOG_FAR, FOG_RANGE, HAZE_COLOUR, IslandAssets, MAX_SPRITES,
-    OBJECT_FAR, QUEUE_RANGE, SPRITE_FLASH, SPRITE_MIRROR, Scene, ViewMode,
+    Anchor, BORDER_COLOUR, CELL, HAZE_COLOUR, IslandAssets, Reach, SPRITE_FLASH, SPRITE_MIRROR, Scene,
+    ViewMode,
 };
 use crate::settings::Enhancements;
 use pd_engine::{Framebuffer, SCREEN_W};
@@ -284,6 +284,7 @@ pub struct Renderer {
     sorder: Vec<i16>,
     keys: Vec<i16>,
     fog_overruns: core::cell::Cell<u32>,
+    reach: Reach,
 }
 
 impl Default for Renderer {
@@ -314,7 +315,19 @@ impl Renderer {
             sorder: Vec::new(),
             keys: Vec::new(),
             fog_overruns: core::cell::Cell::new(0),
+            reach: Reach::ORIGINAL,
         }
+    }
+
+    /// How far the view reaches ([`Reach::ORIGINAL`] unless set).
+    pub fn set_reach(&mut self, reach: Reach) {
+        let n = (reach.half as usize * 2).pow(2);
+        self.gsx.resize(n + 1, 0);
+        self.gsy.resize(n + 1, 0);
+        self.gdepth.resize(n + 32, 0);
+        self.gtile.resize(n, 0);
+        self.gorder.resize(n + 1, 0);
+        self.reach = reach;
     }
 
     /// The back buffer: 640 bytes per row, 480 rows, the view in its top-left
@@ -401,9 +414,9 @@ impl Renderer {
         };
         for (src, s) in scene.sprites.iter().enumerate() {
             // `world_sprite_add`: queue limits.
-            if self.sprites.len() >= MAX_SPRITES
-                || s.x.wrapping_neg().wrapping_sub(scene.camera.x).wrapping_abs() >= QUEUE_RANGE
-                || s.z.wrapping_neg().wrapping_sub(scene.camera.z).wrapping_abs() >= QUEUE_RANGE
+            if self.sprites.len() >= self.reach.max_sprites
+                || s.x.wrapping_neg().wrapping_sub(scene.camera.x).wrapping_abs() >= self.reach.queue_range()
+                || s.z.wrapping_neg().wrapping_sub(scene.camera.z).wrapping_abs() >= self.reach.queue_range()
             {
                 continue;
             }
@@ -452,6 +465,8 @@ impl Renderer {
         let (Some(mesh), true) = (scene.island.meshes.as_ref(), !scene.objects.is_empty()) else {
             return;
         };
+        let queue_range = self.reach.queue_range();
+        let far = self.reach.fog_far;
         // Instance positions as `object3d_place` stores them.
         let place = |o: &super::ObjectInstance| -> Option<[f32; 3]> {
             if !o.active || o.model >= mesh.objects.len() {
@@ -459,7 +474,7 @@ impl Renderer {
             }
             let dx = chp((scene.camera.x.wrapping_neg()) as f64 - o.x as f64);
             let dz = chp((scene.camera.z.wrapping_neg()) as f64 - o.z as f64);
-            if dx.wrapping_abs() >= QUEUE_RANGE || dz.wrapping_abs() >= QUEUE_RANGE {
+            if dx.wrapping_abs() >= queue_range || dz.wrapping_abs() >= queue_range {
                 return None;
             }
             let off = (CELL << 7) as f64;
@@ -472,7 +487,7 @@ impl Renderer {
             let mut pos = place(o);
             if let Some(p) = pos {
                 let (sx, _, depth) = cam.project(cam.local_point(p[0], p[1], p[2]));
-                if depth < 0x191 || depth > 5999 || sx > clip.2 + 300 || sx < clip.0 - 300 {
+                if depth < 0x191 || i32::from(depth) > far - 1 || sx > clip.2 + 300 || sx < clip.0 - 300 {
                     pos = None;
                 } else {
                     any = true;
@@ -546,16 +561,18 @@ impl Renderer {
 
     fn ground_build(&mut self, scene: &Scene, cam: &Cam) {
         let uni = &scene.island.uni;
-        let x0 = (cam.grid_ox.wrapping_add(cam.frac_x) - HALF * CELL) as f32;
-        let mut vz = (cam.grid_oz.wrapping_add(cam.frac_z) - HALF * CELL) as f32;
-        let a0 = 0x80 - cam.cell_x - HALF;
-        let b0 = 0x80 - cam.cell_z - HALF;
+        let half = self.reach.half;
+        let grid = half as usize * 2;
+        let x0 = (cam.grid_ox.wrapping_add(cam.frac_x) - half * CELL) as f32;
+        let mut vz = (cam.grid_oz.wrapping_add(cam.frac_z) - half * CELL) as f32;
+        let a0 = 0x80 - cam.cell_x - half;
+        let b0 = 0x80 - cam.cell_z - half;
         let mut row_phase = scene.view.wave_phase;
-        for i in 0..GRID {
+        for i in 0..grid {
             row_phase = row_phase.wrapping_add(0x32);
             let b = (b0 + i as i32).clamp(0, 255) as usize;
             let mut vx = x0;
-            for j in 0..GRID {
+            for j in 0..grid {
                 let a = (a0 + j as i32).clamp(0, 255) as usize;
                 let at = a * 256 + b;
                 let mut hgt = uni.heights[at] as i32 * 3;
@@ -566,7 +583,7 @@ impl Renderer {
                     6 => hgt += wave((a as i32) * 128 + row_phase) * 2,
                     _ => {}
                 }
-                let n = i * GRID + j;
+                let n = i * grid + j;
                 let (sx, sy, d) = cam.project([vx, hgt as f32, vz]);
                 self.gsx[n] = sx;
                 self.gsy[n] = sy;
@@ -576,7 +593,7 @@ impl Renderer {
             }
             vz += CELL as f32;
         }
-        let n = GRID * GRID;
+        let n = grid * grid;
         self.gdepth[n] = 0;
         self.keys.clear();
         self.keys.extend_from_slice(&self.gdepth[..=n]);
@@ -634,6 +651,8 @@ impl Renderer {
 
     fn ground_draw(&mut self, scene: &Scene, clip: (i32, i32, i32, i32)) -> i32 {
         let island = scene.island;
+        let reach = self.reach;
+        let grid = reach.half as usize * 2;
         let fog = FogMemory { island, overruns: &self.fog_overruns };
         let fog = |level: u8, c: u8| fog.read(level, c);
         let mut t = Target {
@@ -644,34 +663,34 @@ impl Renderer {
             y1: clip.3,
             interlace: scene.interlace,
         };
-        let fog_start = FOG_FAR - FOG_RANGE;
+        let fog_start = reach.fog_far - reach.fog_range;
         let mut horizon = scene.view.horizon;
         let mut face_pos = 0usize;
         let mut sprite_pos = 0usize;
         let nfaces = self.ofaces.len();
         let nsprites = self.sprites.len();
-        let n = GRID * GRID;
+        let n = grid * grid;
         for k in 0..n {
             let idx = self.gorder[n - k] as i32;
-            let (j, i) = (idx % GRID as i32, idx / GRID as i32);
-            if j >= GRID as i32 - 1 || i >= GRID as i32 - 1 || idx < 0 {
+            let (j, i) = (idx % grid as i32, idx / grid as i32);
+            if j >= grid as i32 - 1 || i >= grid as i32 - 1 || idx < 0 {
                 continue;
             }
             let v = idx as usize;
             let ds = [
                 self.gdepth[v] as i32,
                 self.gdepth[v + 1] as i32,
-                self.gdepth[v + GRID] as i32,
-                self.gdepth[v + GRID + 1] as i32,
+                self.gdepth[v + grid] as i32,
+                self.gdepth[v + grid + 1] as i32,
             ];
             let dmin = ds.iter().copied().min().unwrap();
             let dmax = ds.iter().copied().max().unwrap();
-            if !(dmax > 0 && dmin < FOG_FAR) {
+            if !(dmax > 0 && dmin < reach.fog_far) {
                 continue;
             }
             let tile = self.gtile[v] as i16 as i32;
-            for (half, tri) in [(0, [v, v + 1, v + GRID]), (1, [v + GRID + 1, v + 1, v + GRID])] {
-                ground_triangle(&mut t, island, &self.gsx, &self.gsy, &self.gdepth, tile, half, tri, &fog);
+            for (half, tri) in [(0, [v, v + 1, v + grid]), (1, [v + grid + 1, v + 1, v + grid])] {
+                ground_triangle(&mut t, island, &self.gsx, &self.gsy, &self.gdepth, tile, half, tri, &fog, reach);
             }
 
             // Pending 3D object faces behind this cell.
@@ -705,12 +724,12 @@ impl Renderer {
                 if !(hi >= 0 && lo <= t.y1 && hi.wrapping_sub(lo) < 0x5dd) {
                     continue;
                 }
-                if dmax < OBJECT_FAR - 0x5dc {
+                if dmax < reach.fog_far + 500 {
                     let base_texel =
                         map.textures.get(face.texture as usize).map(|r| r.offset as usize).unwrap_or(0);
                     let tex = Texture { page: &map.pixels, base: base_texel };
                     tri_textured(&mut t, x, y, face.u.map(i32::from), face.v.map(i32::from), tex, true);
-                    let lv = p.map(|q| (self.odepth[q] as i32 - fog_start) * 0x40 / FOG_RANGE);
+                    let lv = p.map(|q| (self.odepth[q] as i32 - fog_start) * 0x40 / reach.fog_range);
                     tri_fog(&mut t, x, y, lv, &fog);
                 }
             }
@@ -724,7 +743,7 @@ impl Renderer {
                     break;
                 }
                 sprite_pos += 1;
-                if depth < 6000 && q.visible && q.sx > -0x28 && q.sx <= t.x1 + 0x28 {
+                if depth < reach.fog_far && q.visible && q.sx > -0x28 && q.sx <= t.x1 + 0x28 {
                     let s = &scene.sprites[q.src];
                     let span = q.sy.wrapping_sub(q.sy_ref).wrapping_abs();
                     let mut k = (span as f32 as f64 * s.scale as f64 / 200.0) as f32;
@@ -737,7 +756,7 @@ impl Renderer {
                         }
                     }
                     let (sx, sy) = (q.sx, q.sy);
-                    world_sprite_draw(&mut t, &mut self.scratch, island, s, sx, sy, k, depth);
+                    world_sprite_draw(&mut t, &mut self.scratch, island, s, sx, sy, k, depth, reach);
                 }
                 q.visible = false;
             }
@@ -795,6 +814,7 @@ fn ground_triangle(
     half: i32,
     tri: [usize; 3],
     fog: &impl Fn(u8, u8) -> u8,
+    reach: Reach,
 ) {
     let x = tri.map(|i| sx[i]);
     let y = tri.map(|i| sy[i]);
@@ -826,7 +846,7 @@ fn ground_triangle(
     // original; here it shows texel 0.
     let base = uni.tile_offsets.get((tile & 0xfff) as usize).map(|o| *o as usize).unwrap_or(usize::MAX / 2);
     tri_textured(t, x, y, u, v, Texture { page: &uni.sheet, base }, false);
-    let lv = tri.map(|i| (depth[i] as i32 - (FOG_FAR - FOG_RANGE)) * 0x32 / FOG_RANGE);
+    let lv = tri.map(|i| (depth[i] as i32 - (reach.fog_far - reach.fog_range)) * 0x32 / reach.fog_range);
     tri_fog(t, x, y, lv, fog);
 }
 
@@ -841,8 +861,9 @@ fn world_sprite_draw(
     sy: i32,
     k: f32,
     depth: i32,
+    reach: Reach,
 ) {
-    let level = (depth - (FOG_FAR - FOG_RANGE)) * 72 / FOG_RANGE;
+    let level = (depth - (reach.fog_far - reach.fog_range)) * 72 / reach.fog_range;
     if level > 0x1f {
         return;
     }

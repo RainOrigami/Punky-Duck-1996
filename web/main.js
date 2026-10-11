@@ -6,15 +6,53 @@
 // `image-rendering: pixelated`. No WebGL/wgpu: one 1.2 MB copy per frame is
 // far below budget and it avoids a GPU pipeline that would only do a scale.
 
-import init, { Player, screen_width, screen_height, sample_rate, stored_mode } from "./pkg/pd_web.js";
+import init, { Player, screen_width, screen_height, sample_rate, stored_mode, enhancement_list } from "./pkg/pd_web.js?v=dev";
 
 const $ = (id) => document.getElementById(id);
 const stage = $("stage"), canvas = $("screen"), loader = $("loader"), drop = $("drop");
 const message = $("message"), startButton = $("start"), bar = $("bar"), statusLine = $("status");
 const integerBox = $("integer");
 
-const wasm = await init();
-document.getElementById("mode").value = stored_mode();
+// "?v=dev" is replaced with a hash of the build by web/package.sh, so that a new
+// upload is never mixed with files a browser or host still has cached.
+const wasm = await init({ module_or_path: new URL("./pkg/pd_web_bg.wasm?v=dev", import.meta.url) });
+
+// ---------------------------------------------------------------- version
+
+// Original or enhanced, and for enhanced one checkbox per improvement
+// (all on unless switched off before; the game remembers both).
+const custom = $("custom"), flagBox = $("flags");
+const mode = () => document.querySelector('input[name="mode"]:checked').value;
+const flagInputs = () => [...flagBox.querySelectorAll("input")];
+const flagsOff = () => flagInputs().filter((i) => !i.checked).map((i) => i.value);
+
+function syncVersion() {
+  custom.hidden = mode() !== "enhanced";
+  const off = flagsOff().length;
+  $("custom-count").textContent = off ? `(${off} switched off)` : "(all on)";
+}
+
+document.querySelector(`input[name="mode"][value="${stored_mode()}"]`).checked = true;
+{
+  let group = null, list = null;
+  for (const line of enhancement_list().split("\n")) {
+    const [name, groupName, text, on] = line.split("\t");
+    if (groupName !== group) {
+      group = groupName;
+      flagBox.append(Object.assign(document.createElement("h4"), { textContent: group }));
+      list = flagBox.appendChild(document.createElement("div"));
+    }
+    const label = document.createElement("label");
+    const box = Object.assign(document.createElement("input"), { type: "checkbox", value: name, checked: on === "1" });
+    label.append(box, " " + text);
+    list.append(label);
+  }
+}
+document.getElementById("versions").addEventListener("change", syncVersion);
+for (const [id, on] of [["flags-all", true], ["flags-none", false]]) {
+  $(id).addEventListener("click", () => { for (const i of flagInputs()) i.checked = on; syncVersion(); });
+}
+syncVersion();
 const W = screen_width(), H = screen_height(), RATE = sample_rate();
 
 // ---------------------------------------------------------------- loading
@@ -48,7 +86,7 @@ async function load() {
     const [bin, cue] = await Promise.all([picked.bin.arrayBuffer(), picked.cue.text()]);
     // Copies the image into wasm memory; the ArrayBuffer is garbage afterwards.
     const demo = new URLSearchParams(location.search).has("demo");
-    player = new Player(new Uint8Array(bin), cue, $("mode").value, demo);
+    player = new Player(new Uint8Array(bin), cue, mode(), flagsOff().join(","), demo);
   } catch (e) {
     say(`Could not load the disc image: ${e.message ?? e}`, true);
     return;
@@ -56,8 +94,8 @@ async function load() {
   const info = player.info();
   console.info("pd-web:", info);
   say(info, info.includes("\nerror:"));
-  $("keys").textContent = $("mode").value === "enhanced"
-    ? "Mouse turn · W/S walk · A/D strafe · Click fire · 1–0 weapon · Enter jetpack · Tab map · Esc menu"
+  $("keys").textContent = mode() === "enhanced" && !flagsOff().includes("modern_controls")
+    ? "Mouse turn · W/S walk · A/D strafe · Click fire · 1–0 weapon · E jetpack · Tab map · Esc menu"
     : "Arrows move · Ctrl strafe · Space fire · Backspace weapon · Enter jetpack · Tab map · Esc menu";
   loader.hidden = true;
   canvas.hidden = false;
@@ -101,7 +139,6 @@ function toggleFullscreen() {
   else stage.requestFullscreen().catch((e) => console.warn("fullscreen refused:", e));
 }
 $("fullscreen").addEventListener("click", toggleFullscreen);
-canvas.addEventListener("dblclick", toggleFullscreen);
 
 function present() {
   // Re-create the view every frame: the wasm memory buffer is replaced when it grows.
@@ -192,6 +229,9 @@ window.addEventListener("keyup", (e) => {
 });
 window.addEventListener("blur", () => player?.release_all());
 
+// The left button is still down from the click that took the pointer lock.
+let grabbing = false;
+
 function mouse(e) {
   const r = canvas.getBoundingClientRect();
   if (r.width === 0) return;
@@ -201,14 +241,20 @@ function mouse(e) {
 for (const type of ["pointermove", "pointerdown", "pointerup"]) {
   canvas.addEventListener(type, (e) => {
     if (!running) return;
-    if (document.pointerLockElement === canvas) {
+    if ((e.buttons & 1) === 0) grabbing = false;
+    if (document.pointerLockElement === canvas || grabbing) {
       // Mouse look: relative movement only; the position stays where it was.
-      if (type === "pointermove") player.mouse_motion(e.movementX, e.movementY);
-      player.set_mouse_buttons((e.buttons & 1) !== 0, (e.buttons & 2) !== 0);
+      if (type === "pointermove" && !grabbing) player.mouse_motion(e.movementX, e.movementY);
+      player.set_mouse_buttons((e.buttons & 1) !== 0 && !grabbing, (e.buttons & 2) !== 0);
       return;
     }
     // Pointer lock needs a user gesture, so it is taken on the first click in the view.
-    if (type === "pointerdown" && player.wants_pointer_lock()) canvas.requestPointerLock();
+    // That click only hands over the mouse: the game does not see it as a shot.
+    if (type === "pointerdown" && player.wants_pointer_lock()) {
+      canvas.requestPointerLock();
+      grabbing = true;
+      return;
+    }
     mouse(e);
   });
 }
@@ -216,6 +262,13 @@ for (const type of ["pointermove", "pointerdown", "pointerup"]) {
 function syncPointerLock() {
   if (document.pointerLockElement === canvas && !player.wants_pointer_lock()) document.exitPointerLock();
 }
+// The browser takes the pointer back on Esc and keeps that key press to itself;
+// the game should still see it, so that one Esc opens the menu.
+document.addEventListener("pointerlockchange", () => {
+  if (document.pointerLockElement || !running || help.open || !player.wants_pointer_lock()) return;
+  player.key_event("Escape", true);
+  setTimeout(() => player.key_event("Escape", false), 150);
+});
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // Gamepad API, "standard" mapping -> bit index of Player.set_gamepad

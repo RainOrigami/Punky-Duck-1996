@@ -20,12 +20,13 @@ use super::gfx::{self, Align, BLACK, Canvas, FontState, Pal, Sheet};
 
 use super::keys::sc;
 use super::menu::SaveGame;
+use super::store::MOUSE_SPEED_DEFAULT;
 use crate::render::{
     Anchor, Camera, IslandAssets, ObjectInstance, Renderer, Scene, SpriteBank, ViewMode, ViewState, WorldSprite,
 };
 use crate::settings::Enhancements;
 use crate::sim::shop::{BuyResult, PRODUCT_TABLE, Shop};
-use crate::sim::{Bank, Event, InputEdges, ModernInput, Sim, SimInput, Status};
+use crate::sim::{Bank, Event, InputEdges, ModernInput, Sim, SimInput, SpriteDraw, Status};
 
 /// Why the frame loop of `main` ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +49,10 @@ struct ShopUi {
     /// Picture as loaded, to restore the areas drawn over each pass.
     clean: Vec<u8>,
     leaving: bool,
+    /// Pointer position at the previous pass (`Enhancements::menu_mouse`).
+    mouse: (i32, i32),
+    /// Where the hand was drawn last, to take it off the screen after a jump.
+    drawn: (i32, i32),
 }
 
 /// Hot zones of the shop (`0x2b3a0` calls at `0x2a52b`): BUY, CANCEL, EXIT,
@@ -114,6 +119,57 @@ pub struct World {
     pub pending_load: Option<Vec<u8>>,
     /// Frames presented since the island was entered (tests, traces).
     pub frames: u64,
+    /// Esc is ignored until it has been seen up (`Enhancements::menu_esc_resumes`:
+    /// the key that left the menu may still be down).
+    esc_block: bool,
+    /// The last two simulation frames as drawn (`Enhancements::smooth_view`).
+    snap: Option<Snap>,
+    snap_prev: Option<Snap>,
+    minimap: Option<MiniMap>,
+    /// Heading change of the last simulation frame without the mouse's part.
+    key_turn: f32,
+}
+
+/// What one simulation frame handed to the renderer.
+struct Snap {
+    cam_x: i32,
+    cam_z: i32,
+    angle: f32,
+    /// Part of the heading change of this frame that came from the keys.
+    key_turn: f32,
+    view: ViewState,
+    objects: Vec<ObjectInstance>,
+    sprites: Vec<SpriteDraw>,
+    hud: HudState,
+}
+
+/// `CARTE0n.RON` at one pixel per cell in the island's colours
+/// (`Enhancements::minimap`).
+struct MiniMap {
+    /// 256 x 240, row = map row (cell z - 8).
+    cells: Vec<u8>,
+    dark: u8,
+    frame: u8,
+    tele: u8,
+    hint: u8,
+    duck: u8,
+}
+
+fn nearest(pal: &Pal, rgb: [i32; 3]) -> u8 {
+    (0..256usize)
+        .min_by_key(|&i| (0..3).map(|k| (pal[i][k] as i32 - rgb[k]).pow(2)).sum::<i32>())
+        .unwrap_or(0) as u8
+}
+
+fn lerp(a: i32, b: i32, t: f32) -> i32 {
+    a + ((b - a) as f32 * t).round() as i32
+}
+
+/// Largest jump in world units that is still shown as movement.
+const LERP_MAX: i32 = 600;
+
+fn lerp_near(a: i32, b: i32, t: f32) -> i32 {
+    if (b - a).abs() > LERP_MAX { b } else { lerp(a, b, t) }
 }
 
 fn empty_bank() -> SpriteBank {
@@ -198,7 +254,39 @@ impl World {
             zero_ticks: false,
             pending_load: None,
             frames: 0,
+            esc_block: false,
+            snap: None,
+            snap_prev: None,
+            minimap: None,
+            key_turn: 0.0,
         }
+    }
+
+    /// Radians per device pixel at the MOUSE SPEED setting.
+    fn mouse_scale(core: &Core) -> f32 {
+        MOUSE_SENSITIVITY * 1.25f32.powi(core.settings.mouse_speed as i32 - MOUSE_SPEED_DEFAULT as i32)
+    }
+
+    fn load_minimap(&self, core: &mut Core, n: i32) -> Option<MiniMap> {
+        let pic = core.load_picture(&format!("CARTE0{n}.RON"))?;
+        let pal = self.island_pal();
+        let remap: Vec<u8> = (0..256).map(|i| nearest(&pal, pic.pal[i].map(i32::from))).collect();
+        let mut cells = vec![0u8; 256 * 240];
+        for (cz, row) in cells.chunks_exact_mut(256).enumerate() {
+            for (cx, c) in row.iter_mut().enumerate() {
+                if let Some(&p) = pic.pixels.get(cz * 2 * pic.w + cx * 2) {
+                    *c = remap[p as usize];
+                }
+            }
+        }
+        Some(MiniMap {
+            cells,
+            dark: nearest(&pal, [4, 4, 6]),
+            frame: nearest(&pal, [50, 50, 50]),
+            tele: nearest(&pal, [16, 32, 63]),
+            hint: nearest(&pal, [0, 63, 0]),
+            duck: nearest(&pal, [63, 8, 8]),
+        })
     }
 
     fn bank(core: &mut Core, name: &str) -> SpriteBank {
@@ -312,11 +400,20 @@ impl World {
         self.animaps = core.load_picture("ANIMAPS.RON");
         self.text = core.assets.load(&format!("ILE_{n}.TXT")).and_then(|d| TextFile::parse(&d).ok());
         self.sim.enter();
+        self.minimap = if self.enh.minimap { self.load_minimap(core, n) } else { None };
+        self.snap = None;
+        self.snap_prev = None;
+        self.esc_block = self.enh.menu_esc_resumes;
+        core.clicks = (false, false);
+        core.mouse_dx = 0.0;
 
         core.video.set_palette(&BLACK);
         self.reinit = 1;
         self.view = ViewState::default();
         self.renderer.reset();
+        if self.enh.far_view {
+            self.renderer.set_reach(crate::render::Reach::cells(crate::settings::FAR_VIEW_CELLS));
+        }
         core.kbd.set_bios(false);
         self.edges = InputEdges::default();
         self.edges.poll(&sim_input(&core.input));
@@ -405,9 +502,15 @@ impl World {
         self.sim.apply_cheats(self.cheats & 0x7fff);
     }
 
-    /// `true` while the island view is up and steered by the mouse.
+    /// `true` while the pointer belongs to the island view: always, except in the
+    /// shop, whose hand it moves.
     pub fn wants_mouse(&self) -> bool {
-        self.enh.modern_controls && matches!(self.modal, Modal::None)
+        self.enh.modern_controls && !matches!(self.modal, Modal::Shop(_))
+    }
+
+    /// `true` while mouse movement turns the duck.
+    pub fn wants_turn(&self) -> bool {
+        self.enh.modern_controls && matches!(self.modal, Modal::None) && self.pause == 0 && self.sim.s.p.dead == 0
     }
 
     // ---- frame loop --------------------------------------------------------
@@ -454,7 +557,11 @@ impl World {
 
         // Top of the loop: `while (!key[ESC] && lives >= 0 && next_island == 0)`.
         if core.kbd.is_down(sc::ESC) || core.input.cancel {
-            return Some(Leave::Escape);
+            if !self.esc_block {
+                return Some(Leave::Escape);
+            }
+        } else {
+            self.esc_block = false;
         }
         match self.sim.status() {
             Status::Playing => {}
@@ -507,6 +614,7 @@ impl World {
         // game_tick_frame (0x2a260).
         self.poll_cheats(core);
         let mut held = sim_input(&core.input);
+        let mut turn = 0.0;
         if self.enh.modern_controls {
             let k = &core.kbd;
             let (a, d) = (k.is_down(0x1e), k.is_down(0x20));
@@ -518,6 +626,8 @@ impl World {
                 held.right = false;
             }
             held.fire |= core.input.mouse_left;
+            held.jetpack |= k.is_down(0x12);
+            turn = core.mouse_dx * Self::mouse_scale(core);
             // The number row selects weapons, so the quest pictures move to F3 / F4.
             held.key1 = k.is_down(0x3d);
             held.key2 = k.is_down(0x3e);
@@ -525,7 +635,7 @@ impl World {
             let pressed = digits & !self.digits_prev;
             self.digits_prev = digits;
             self.sim.modern = ModernInput {
-                turn: core.mouse_dx * MOUSE_SENSITIVITY,
+                turn,
                 strafe_left: a,
                 strafe_right: d,
                 select_weapon: (pressed != 0).then(|| pressed.trailing_zeros() as u8),
@@ -535,7 +645,15 @@ impl World {
         let input = self.edges.poll(&held);
         let ticks = self.g_ticks as i32 + core.settings.stp.game_speed;
         self.g_ticks = 0;
+        let before = self.sim.s.p.angle;
+        if self.sim.s.p.dead != 0 {
+            turn = 0.0;
+        }
         self.sim.frame(&input, ticks);
+        // The heading is kept within one turn; anything large is a jump, not a turn.
+        let d = (self.sim.s.p.angle - before - turn + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        self.key_turn = if d.abs() < 0.5 { d } else { 0.0 };
         self.frame_no = self.frame_no.wrapping_add(1);
         // cd_loop_check (0x11f70).
         if core.settings.stp.music_on != 0 && self.frame_no % 10 == 0 && !core.cd_playing {
@@ -678,7 +796,7 @@ impl World {
             let mut tail = vec![
                 Op::Fade(gfx::Fade::new(0, 10, &BLACK, &pal)),
                 // while (!input.space) input_poll(1);
-                Op::Until(Box::new(|core: &Core| core.input.secondary)),
+                Op::Until(Box::new(|core: &Core| core.input.secondary || (core.enh.menu_mouse && core.input.mouse_left))),
                 Op::Fade(gfx::Fade::new(0, 10, &pal, &BLACK)),
                 Op::Do(Box::new(|core: &mut Core| core.video.fill_screen(0xfe))),
             ];
@@ -804,6 +922,8 @@ impl World {
             pal: BLACK,
             clean: Vec::new(),
             leaving: false,
+            mouse: (core.input.mouse_x, core.input.mouse_y),
+            drawn: (0x140, 0xf0),
         }));
     }
 
@@ -842,7 +962,7 @@ impl World {
         }
         if ui.leaving {
             // do {} while (input_any()); fade out; back to the island.
-            if core.input_any() {
+            if core.input_any() || (self.enh.menu_mouse && (core.input.mouse_left || core.input.mouse_right)) {
                 return false;
             }
             let pal = ui.pal;
@@ -854,12 +974,23 @@ impl World {
             self.sim.shop_exit();
             return true;
         }
-        if core.kbd.is_down(sc::ESC) || core.input.cancel {
+        let mouse = self.enh.menu_mouse;
+        if core.kbd.is_down(sc::ESC) || core.input.cancel || (mouse && core.input.mouse_right) {
             ui.leaving = true;
             return false;
         }
         let i = core.input;
-        let click = i.secondary;
+        let mut click = i.secondary;
+        if mouse {
+            // The hand goes where the pointer goes; the keys still move it.
+            let pos = (i.mouse_x, i.mouse_y);
+            if pos != ui.mouse {
+                ui.mouse = pos;
+                ui.x = pos.0.clamp(8, 599);
+                ui.y = pos.1.clamp(8, 0x1b9);
+            }
+            click |= i.mouse_left;
+        }
         let mut zone = -1;
         if click {
             zone = shop_zones()
@@ -938,6 +1069,11 @@ impl World {
         }
         core.video.sprite(&self.hand, 0, x, y);
         let rects = [(0xda, 0x1a9, 0xff, 0x23), (0xf5, 0x13c, 0xb4, 0x61), (x - 4, y - 4, 0x28, 0x28)];
+        if mouse {
+            // The pointer can move the hand further than its own margin.
+            let (px, py) = std::mem::replace(&mut ui.drawn, (x, y));
+            core.video.present_rect(px - 4, py - 4, px + 0x23, py + 0x23);
+        }
         for (x0, y0, w, h) in rects {
             core.video.present_rect(x0, y0, x0 + w - 1, y0 + h - 1);
         }
@@ -976,11 +1112,11 @@ impl World {
     /// picture reaches the screen [`World::frame_ticks`] ticks later.
     fn render(&mut self, core: &mut Core) {
         self.animate_tiles();
-        let Some(island) = self.island.as_ref() else { return };
+        if self.island.is_none() {
+            return;
+        }
         let s = &self.sim.s;
         self.view.begin_frame(s.p.py);
-        let mode = Self::view_mode(core);
-        let interlace = core.settings.fast_mode != 0;
         let mut objects: Vec<ObjectInstance> = Vec::new();
         for m in &self.sim.meshes {
             let slot = m.slot.max(0) as usize;
@@ -1000,8 +1136,41 @@ impl World {
                 rot_b: m.yaw,
             };
         }
-        let sprites: Vec<WorldSprite> = self
-            .sim
+        let hud = HudState {
+            energy: s.hud_energy,
+            money: s.hud_money,
+            lives: s.p.lives,
+            fuel: s.p.fuel,
+            weapon: s.p.weapon,
+            ammo: s.p.ammo[(s.p.weapon & 15).min(9) as usize],
+            power: s.p.power,
+            compass: s.p.compass != 0,
+            angle: s.p.angle,
+            boss: (s.boss_state == 1).then(|| (s.monsters.first().map_or(0, |m| m.hp), (s.difficulty + 1) * s.island * 10)),
+        };
+        let snap = Snap {
+            cam_x: s.p.cam_x,
+            cam_z: s.p.cam_z,
+            angle: s.p.angle,
+            key_turn: self.key_turn,
+            view: self.view,
+            objects,
+            sprites: self.sim.sprites.clone(),
+            hud,
+        };
+        self.view.horizon = self.draw(core, &snap);
+        if self.enh.smooth_view {
+            self.snap_prev = self.snap.replace(snap);
+        }
+        self.wait = self.frame_ticks;
+    }
+
+    /// Scene and HUD of `snap` into the renderer's back buffer. Returns the
+    /// horizon row for the next frame's sky.
+    fn draw(&mut self, core: &Core, snap: &Snap) -> i32 {
+        let Some(island) = self.island.as_ref() else { return snap.view.horizon };
+        let mode = Self::view_mode(core);
+        let sprites: Vec<WorldSprite> = snap
             .sprites
             .iter()
             .map(|d| WorldSprite {
@@ -1026,30 +1195,89 @@ impl World {
         let scene = Scene {
             island,
             mode,
-            interlace,
-            camera: Camera { x: s.p.cam_x, z: s.p.cam_z, heading: s.p.angle },
-            view: self.view,
-            objects: &objects,
+            interlace: core.settings.fast_mode != 0,
+            camera: Camera { x: snap.cam_x, z: snap.cam_z, heading: snap.angle },
+            view: snap.view,
+            objects: &snap.objects,
             sprites: &sprites,
         };
-        self.view.horizon = self.renderer.render(&scene).horizon;
-        let hud = HudState {
-            energy: s.hud_energy,
-            money: s.hud_money,
-            lives: s.p.lives,
-            fuel: s.p.fuel,
-            weapon: s.p.weapon,
-            ammo: s.p.ammo[(s.p.weapon & 15).min(9) as usize],
-            power: s.p.power,
-            compass: s.p.compass != 0,
-            angle: s.p.angle,
-            boss: (s.boss_state == 1).then(|| (s.monsters.first().map_or(0, |m| m.hp), (s.difficulty + 1) * s.island * 10)),
-        };
+        let horizon = self.renderer.render(&scene).horizon;
         let (_, vh) = mode.size();
+        let high = mode == ViewMode::High;
         let mut canvas = Canvas { pix: self.renderer.back_mut(), clip_y0: 0, clip_y1: vh - 1 };
-        draw_hud(&mut canvas, &self.numbers, &hud, mode == ViewMode::High);
+        draw_hud(&mut canvas, &self.numbers, &snap.hud, high);
+        if let Some(map) = &self.minimap {
+            draw_minimap(&mut canvas, map, &self.sim.s, snap, high);
+        }
+        horizon
+    }
 
-        self.wait = self.frame_ticks;
+    /// Between two simulation frames (`Enhancements::smooth_view`): draw the
+    /// view for the moment the frontend is about to show. `phase` is the part
+    /// of the current 70 Hz tick that has passed.
+    pub fn render_smooth(&mut self, core: &mut Core, phase: f32) {
+        if !self.enh.smooth_view || self.reinit != 0 || core.busy() || !matches!(self.modal, Modal::None) {
+            return;
+        }
+        let (Some(cur), Some(prev)) = (self.snap.as_ref(), self.snap_prev.as_ref()) else { return };
+        let done = self.frame_ticks.saturating_sub(self.wait) as f32 + phase.clamp(0.0, 1.0);
+        let t = (done / self.frame_ticks as f32).clamp(0.0, 1.0);
+        let cam_x = lerp_near(prev.cam_x, cur.cam_x, t);
+        let cam_z = lerp_near(prev.cam_z, cur.cam_z, t);
+        // Mouse movement the simulation has not seen yet turns the view already.
+        let pending = if self.wants_turn() { core.mouse_dx * Self::mouse_scale(core) } else { 0.0 };
+        let angle = cur.angle - cur.key_turn * (1.0 - t) + pending;
+        // The queue has no identities and its order changes as things come into range,
+        // so each sprite is paired with the nearest one of its kind in the previous
+        // frame: something that stands still pairs with itself and does not move.
+        let earlier = |c: &SpriteDraw| {
+            prev.sprites
+                .iter()
+                .filter(|p| p.bank == c.bank && p.scale == c.scale && (p.y < 0) == (c.y < 0))
+                .map(|p| (((p.x - c.x) as i64).pow(2) + ((p.z - c.z) as i64).pow(2), p))
+                .min_by_key(|&(d, _)| d)
+                .filter(|&(d, _)| d <= (LERP_MAX as i64).pow(2))
+                .map(|(_, p)| p)
+        };
+        let sprites = cur
+            .sprites
+            .iter()
+            .map(|c| {
+                let mut d = *c;
+                if c.scale <= -900.0 {
+                    // The horizon marker ten cells ahead of the duck (`player_draw`).
+                    d.x = (angle.cos() * 3000.0) as i32 - cam_x;
+                    d.z = (angle.sin() * 3000.0) as i32 - cam_z;
+                } else if (c.x, c.z) == (-cur.cam_x, -cur.cam_z) {
+                    // The duck stays under the camera.
+                    (d.x, d.z) = (-cam_x, -cam_z);
+                    if let Some(p) = prev.sprites.iter().find(|p| (p.x, p.z) == (-prev.cam_x, -prev.cam_z) && p.scale == c.scale) {
+                        if (p.y < 0) == (c.y < 0) {
+                            d.y = lerp(p.y, c.y, t);
+                        }
+                    }
+                } else if let Some(p) = earlier(c) {
+                    (d.x, d.y, d.z) = (lerp(p.x, c.x, t), lerp(p.y, c.y, t), lerp(p.z, c.z, t));
+                }
+                d
+            })
+            .collect();
+        let mut view = cur.view;
+        view.eye_h = lerp(prev.view.eye_h, cur.view.eye_h, t);
+        view.look_h = lerp(prev.view.look_h, cur.view.look_h, t);
+        let snap = Snap {
+            cam_x,
+            cam_z,
+            angle,
+            key_turn: 0.0,
+            view,
+            objects: cur.objects.clone(),
+            sprites,
+            hud: HudState { angle, ..cur.hud },
+        };
+        self.draw(core, &snap);
+        let mode = Self::view_mode(core);
+        self.renderer.present(&mut core.video.screen, mode, core.settings.fast_mode != 0, &self.enh);
     }
 
     fn present(&mut self, core: &mut Core) {
@@ -1151,8 +1379,59 @@ fn line(a: (i32, i32), b: (i32, i32), mut put: impl FnMut(i32, i32)) {
     }
 }
 
+/// The surroundings of the duck from the map picture, one pixel per cell
+/// (two cells in the 320x200 views), north as on the map screen; unexplored
+/// cells stay dark. Markers as on the map screen (`map_screen`, `0x280f0`).
+fn draw_minimap(c: &mut Canvas, map: &MiniMap, s: &crate::sim::State, snap: &Snap, high: bool) {
+    let (n, step, x0, y0) = if high { (96, 1, 520, 64) } else { (48, 2, 260, 32) };
+    // Cell of the duck: column as on the map, row in `explored` (8 more than the map row).
+    let (pcx, pcz) = (128 - snap.cam_x / 300, 128 - snap.cam_z / 300);
+    for j in 0..n {
+        for i in 0..n {
+            let (cx, cz) = (pcx + (i - n / 2) * step, pcz + (j - n / 2) * step);
+            let seen = (0..256).contains(&cx)
+                && (8..248).contains(&cz)
+                && s.explored.get((cx * 256 + cz) as usize).is_some_and(|&e| e != 0);
+            let colour = if seen { map.cells[((cz - 8) * 256 + cx) as usize] } else { map.dark };
+            c.pix[(y0 + j) as usize * gfx::W + (x0 + i) as usize] = colour;
+        }
+    }
+    let dot = |c: &mut Canvas, wx: i32, wz: i32, colour: u8| {
+        // The map screen draws these two rows below their cell (0xf4 against 0xf0).
+        let (i, j) = ((128 + wx / 300 - pcx) / step + n / 2, (130 + wz / 300 - pcz) / step + n / 2);
+        if (1..n - 1).contains(&i) && (1..n - 1).contains(&j) {
+            c.fill_rect(x0 + i - 1, y0 + j - 1, x0 + i + 1, y0 + j + 1, colour);
+        }
+    };
+    for k in 0..10 {
+        if s.q.tele_x[k] != -1 {
+            dot(c, s.q.tele_x[k], s.q.tele_z[k], map.tele);
+        }
+    }
+    for k in 0..20 {
+        if s.q.hint_x[k] != -1 {
+            dot(c, s.q.hint_x[k], s.q.hint_z[k], map.hint);
+        }
+    }
+    let (mx, my) = (x0 + n / 2, y0 + n / 2);
+    if snap.hud.compass {
+        // The map screen's triangle, smaller.
+        let a = snap.angle as f64;
+        let r = if high { 5.0 } else { 3.0 };
+        let at = |a: f64, r: f64| ((mx as f64 + a.cos() * r) as i32, (my as f64 + a.sin() * r) as i32);
+        let (tip, b1, b2) = (at(a, r), at(a - 0.7, -r), at(a + 0.7, -r));
+        for (p, q) in [(b1, b2), (tip, b1), (tip, b2)] {
+            line(p, q, |x, y| c.fill_rect(x, y, x, y, map.duck));
+        }
+    } else {
+        c.fill_rect(mx - 1, my - 1, mx + 1, my + 1, map.duck);
+    }
+    c.rect_outline(x0 - 1, y0 - 1, x0 + n, y0 + n, map.frame);
+}
+
 /// What the HUD shows (`hud_draw`, `0x246b0`; the counters it also updates
 /// are advanced by the simulation).
+#[derive(Clone, Copy)]
 pub struct HudState {
     /// Displayed energy 0..=99 (`0x415fc`) and money (`0x415f8`).
     pub energy: i32,

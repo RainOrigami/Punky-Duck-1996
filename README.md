@@ -30,6 +30,7 @@ uploaded anywhere. The page has a Help button listing every control, option and 
 cargo build --release -p pd-native
 ./target/release/pd-native --disc path/to/PUNKYDUCK.cue             # original behaviour
 ./target/release/pd-native --disc path/to/PUNKYDUCK.cue --enhanced  # modern controls and fixes
+./target/release/pd-native --disc path/to/PUNKYDUCK.cue --enhanced --without minimap,far_view
 ```
 
 More options, the web build and headless runs are in [docs/build.md](docs/build.md).
@@ -41,11 +42,22 @@ One switch selects how the game behaves.
 - **Original** reproduces the DOS release, bugs included. As on the original disc, finishing
   the first island plays the ending; the other four islands are reached through the
   original's level-select cheat or a saved game.
-- **Enhanced** adds mouse look, WASD with strafing, fire on the left mouse button and number
-  keys for weapons, and fixes the original's bugs (finishing island 1 leads on to island 2,
-  the compass survives loading, monsters keep to their patrol paths, and more).
+- **Enhanced** modernises it:
+  - *Controls:* mouse look with adjustable speed, WASD with strafing (over water too), fire
+    on the left mouse button, number keys for weapons, E for the jetpack.
+  - *Picture:* the island view is drawn on every screen refresh instead of about 17 times a
+    second, reaches four times as far, and has a minimap.
+  - *Menus:* mouse, WASD and Space work in the menus and the shop; Esc in the main menu
+    returns to the game; pictures and dialogue wait for Space, Enter or a click instead of
+    vanishing on the next movement key.
+  - *Game:* finishing island 1 leads on to island 2, the compass survives loading, and
+    monsters leave you alone for the first seconds after you appear.
+  - *Bug fixes:* monsters keep to their patrol paths, a death costs one life instead of
+    sometimes two, the pickups the original loses at island start are there, and more.
 
-Every difference between the two is a named flag in
+Each enhancement can be switched off on its own: on the play page under *Choose
+enhancements*, natively with `--without <names>` (`--list-enhancements` prints the names).
+All of them are named flags in
 [`crates/pd-game/src/settings.rs`](crates/pd-game/src/settings.rs), each documented with the
 original behaviour it replaces.
 
@@ -58,12 +70,16 @@ original behaviour it replaces.
 | Strafe | Hold Ctrl and turn | A / D |
 | Fire | Space | Left mouse button, or Space |
 | Choose weapon | Backspace (next) | 1–9, 0 directly; Backspace (next) |
-| Jetpack | Enter | Enter |
+| Jetpack | Enter | E, or Enter |
 | Map | Tab | Tab |
 | Inventory | Home, End, PgUp, PgDn, Ins or Del | same |
 | Quest pictures | 1, 2 | F3, F4 |
 | Pause | P, or a mouse click | P |
-| Menu (save, load, options) | Esc | Esc |
+| Close a picture or dialogue | Any game key | Space, Enter, Tab or a click |
+| Menu (save, load, options) | Esc | Esc (and Esc again to return) |
+
+In the enhanced version the menus and the shop also take the mouse, and the mouse speed is
+set under OPTIONS, CONTROLLER OPTIONS.
 
 ### Level select
 
@@ -83,8 +99,11 @@ identical save files.
 
 Still open:
 
-- The island view is drawn about 17 times a second, like the original on a period PC, which
-  makes mouse look feel coarse.
+- The game itself still runs at the original's pace of about 17 steps a second; the enhanced
+  version draws the view in between, moving monsters and shots between their two known
+  positions.
+- With the far view, monsters only wake up at the original distance, closer than the
+  scenery now reaches.
 - Gamepads are untested.
 - Attract mode and joystick calibration are not implemented.
 

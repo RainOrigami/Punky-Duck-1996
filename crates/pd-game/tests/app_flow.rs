@@ -325,3 +325,204 @@ fn modal_screens_return_to_the_island() {
     assert_eq!(r.game.errors(), &[] as &[String]);
     assert_eq!(r.game.stage_name(), "island");
 }
+
+// ---- enhanced mode ----------------------------------------------------------
+
+fn enhanced() -> Option<Rig> {
+    Rig::new(GameOptions { intro: false, credits: false, frame_ticks: 8, mode: Mode::Enhanced }, SharedStorage::default())
+}
+
+impl Rig {
+    /// A key the frontends do not bind to a button.
+    fn tap_key(&mut self, scancode: u8) {
+        self.game.key_event(scancode, true);
+        self.run(12);
+        self.game.key_event(scancode, false);
+        self.run(28);
+    }
+
+    fn click(&mut self, x: i32, y: i32) {
+        (self.held.mouse_x, self.held.mouse_y) = (x, y);
+        self.run(12);
+        self.held.mouse_left = true;
+        self.run(12);
+        self.held.mouse_left = false;
+        self.run(28);
+    }
+
+    fn picture(&mut self) -> Vec<u8> {
+        let mut fb = Framebuffer::new();
+        self.game.render(&mut fb);
+        fb.pixels.to_vec()
+    }
+}
+
+const KEY_W: u8 = 0x11;
+const KEY_S: u8 = 0x1f;
+
+#[test]
+fn enhanced_menus_take_wasd_and_space() {
+    // W from NEW GAME wraps to EXIT, Space opens EXIT GAME ?, S moves to YES, Space quits.
+    let Some(mut r) = enhanced() else { return };
+    r.run(60);
+    for k in [KEY_W, 0x39, KEY_S, 0x39] {
+        r.tap_key(k);
+    }
+    r.until("quit", 200);
+    // The original reads the same keys as text.
+    let Some(mut r) = Rig::plain() else { return };
+    r.run(60);
+    for k in [KEY_W, 0x39, KEY_S, 0x39] {
+        r.tap_key(k);
+    }
+    r.run(200);
+    assert_eq!(r.game.stage_name(), "menu");
+}
+
+#[test]
+fn enhanced_menus_take_the_mouse() {
+    let Some(mut r) = enhanced() else { return };
+    r.run(60);
+    r.click(320, 332); // EXIT
+    assert_eq!(r.game.stage_name(), "menu");
+    r.click(320, 292); // YES, SORRY...
+    r.until("quit", 200);
+
+    let Some(mut r) = Rig::plain() else { return };
+    r.run(60);
+    r.click(320, 332);
+    r.click(320, 292);
+    r.run(200);
+    assert_eq!(r.game.stage_name(), "menu");
+}
+
+#[test]
+fn enhanced_level_select_phrase_still_works() {
+    let Some(mut r) = enhanced() else { return };
+    r.run(60);
+    r.type_text("THE TRUTH IS OUT THERE");
+    assert!(r.traced("cheat"));
+    assert_eq!(r.game.stage_name(), "menu", "the spaces of the phrase chose nothing");
+    r.run(40);
+    r.tap(ENTER);
+    r.tap(DOWN);
+    r.tap(ENTER);
+    r.until("island", 300);
+    assert!(r.traced("island 2"));
+}
+
+#[test]
+fn enhanced_escape_in_the_main_menu_resumes() {
+    let Some(mut r) = enhanced() else { return };
+    r.run(60);
+    r.tap(ENTER);
+    r.until("island", 300);
+    r.run(120);
+    r.tap(ESC);
+    r.until("menu", 50);
+    r.run(40);
+    r.tap(ESC);
+    r.until("island", 300);
+    r.run(200);
+    assert_eq!(r.game.stage_name(), "island");
+    assert!(r.game.world().frames > 5);
+    assert_eq!(r.game.errors(), &[] as &[String]);
+}
+
+#[test]
+fn enhanced_view_is_drawn_between_simulation_frames() {
+    let Some(mut r) = enhanced() else { return };
+    r.run(60);
+    r.tap(ENTER);
+    r.until("island", 300);
+    r.run(150);
+    r.game.key_event(UP, true);
+    r.held.up = true;
+    r.run(80);
+    // Line up with the start of a simulation frame, then look twice inside it.
+    let f = r.game.world().frames;
+    while r.game.world().frames == f {
+        r.run(1);
+    }
+    let frames = r.game.world().frames;
+    let a = r.picture();
+    r.run(3);
+    let b = r.picture();
+    assert_eq!(r.game.world().frames, frames, "no simulation frame in between");
+    let changed = a.iter().zip(&b).filter(|(x, y)| x != y).count();
+    assert!(changed > 1000, "the view moved between two simulation frames ({changed} pixels)");
+
+    // The minimap: a frame of one colour around 96 x 96 pixels at (520, 64) of the view.
+    let at = |x: usize, y: usize| b[(40 + y) * 640 + x];
+    let frame = at(519, 63);
+    assert!((519..=616).all(|x| at(x, 63) == frame && at(x, 160) == frame));
+    assert!((63..=160).all(|y| at(519, y) == frame && at(616, y) == frame));
+
+    // The original draws one picture per simulation frame and no map.
+    let Some(mut r) = Rig::plain() else { return };
+    r.run(60);
+    r.tap(ENTER);
+    r.until("island", 300);
+    r.run(150);
+    r.game.key_event(UP, true);
+    r.held.up = true;
+    r.run(80);
+    let f = r.game.world().frames;
+    while r.game.world().frames == f {
+        r.run(1);
+    }
+    let a = r.picture();
+    r.run(3);
+    assert_eq!(a, r.picture());
+}
+
+#[test]
+fn safe_spawn_keeps_the_start_of_island_one_quiet() {
+    use pd_game::settings::Enhancements;
+    let run = |enh: Enhancements| -> Option<(i32, i32)> {
+        let dir = disc_dir()?;
+        let storage = SharedStorage::default();
+        let opts = GameOptions { intro: false, credits: false, frame_ticks: 4, mode: Mode::Enhanced };
+        let game = Game::with_enhancements(Box::new(DirAssets(dir)), Box::new(storage.clone()), opts, enh);
+        let mut r = Rig { game, storage, commands: Vec::new(), ticks: 0, held: Input::default() };
+        r.run(60);
+        r.tap(ENTER);
+        r.until("island", 300);
+        // Standing still: four seconds, then another ten.
+        r.run(280);
+        let early = r.game.world().sim.s.p.energy;
+        r.run(700);
+        Some((early, r.game.world().sim.s.p.energy))
+    };
+    let Some((early, _)) = run(Enhancements::enhanced()) else { return };
+    assert_eq!(early, 99, "nothing has hurt the duck yet");
+    let (early, late) = run(Enhancements { safe_spawn: false, ..Enhancements::enhanced() }).unwrap();
+    eprintln!("without safe_spawn: energy {early} after 4 s, {late} after 14 s");
+    assert!(late < 99, "the original start is under fire");
+}
+
+#[test]
+fn enhanced_dialogue_waits_for_a_confirm_key() {
+    for enhanced_mode in [true, false] {
+        let Some(mut r) = (if enhanced_mode { enhanced() } else { Rig::plain() }) else { return };
+        r.run(60);
+        r.tap(ENTER);
+        r.until("island", 300);
+        r.run(400);
+        let before = r.game.world().frames;
+        r.game.world_mut().queue_event(Event::Say(0));
+        r.run(60);
+        // Walking on (W / Up) while the text is up.
+        r.held.up = true;
+        r.tap(UP);
+        r.held.up = false;
+        r.run(120);
+        let dismissed = r.game.world().frames > before + 3;
+        assert_eq!(dismissed, !enhanced_mode, "a movement key ends the dialogue only in the original");
+        if enhanced_mode {
+            r.tap(0x39);
+            r.run(120);
+            assert!(r.game.world().frames > before + 3, "Space ends it");
+        }
+    }
+}

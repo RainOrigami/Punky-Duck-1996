@@ -210,7 +210,7 @@ impl Sim {
             let dx = b.x.wrapping_neg().wrapping_sub(self.s.p.px).wrapping_abs();
             let dz = b.z.wrapping_neg().wrapping_sub(self.s.p.pz).wrapping_abs();
             // The original tests the X distance twice; Z is not tested for drawing.
-            if dx >= 4500 {
+            if dx >= self.draw_range() {
                 continue;
             }
             if dz < 120 && dx < 120 && self.s.p.hurt == 0 {
@@ -260,7 +260,7 @@ impl Sim {
             let dx = it.x.wrapping_neg().wrapping_sub(self.s.p.px) as f64;
             let dz = it.z.wrapping_neg().wrapping_sub(self.s.p.pz) as f64;
             // Signed compare on X only.
-            if dx < 4500.0 {
+            if dx < self.draw_range() as f64 {
                 self.sprite(it.id, Bank::Icone, 0, it.x, it.y, it.z, 4.0);
                 if dx * dx + dz * dz < 24000.0 && it.icon < 100 {
                     self.s.q.touch = it.id;

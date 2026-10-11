@@ -71,6 +71,11 @@ impl Sheet {
         self.sprites.get(index).map_or(0, |s| s.w)
     }
 
+    /// Row of the middle of sprite `index` relative to the `y` it is drawn at.
+    pub fn middle_row(&self, index: usize) -> i32 {
+        self.sprites.get(index).map_or(0, |s| s.hot_y + 1 + s.rows.len() as i32 / 2)
+    }
+
     pub fn height(&self, index: usize) -> i32 {
         self.sprites.get(index).map_or(0, |s| s.h)
     }
@@ -103,7 +108,7 @@ impl FontState {
     /// Glyph index for a text byte, as both `0x32c10` and `0x32ce0` test it:
     /// `0 <= index <= limit` (one more than the sheet has; kept, but an index
     /// the drawing sheet does not have draws nothing here).
-    fn glyph(&self, byte: u8) -> Option<usize> {
+    pub fn glyph(&self, byte: u8) -> Option<usize> {
         let i = byte as i32 - self.first_char;
         (0..=self.limit).contains(&i).then_some(i as usize)
     }

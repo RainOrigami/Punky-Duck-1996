@@ -90,6 +90,42 @@ code {
 }
 .slot.ready { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
 
+#versions {
+  margin: 0 0 1rem;
+  padding: 0;
+  border: 0;
+  text-align: left;
+}
+#versions legend { padding: 0; margin: 0 auto .4rem; color: var(--dim); font-size: .85rem; }
+.choices { display: flex; gap: .75rem; flex-wrap: wrap; }
+.choice {
+  flex: 1 1 14rem;
+  display: flex;
+  gap: .6rem;
+  align-items: flex-start;
+  padding: .7rem .9rem;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.choice:hover { background: #1a1f2a; }
+.choice:has(input:checked) { border-color: var(--accent); }
+.choice:has(input:focus-visible) { outline: 2px solid var(--text); outline-offset: 3px; }
+.choice input { margin-top: .3rem; accent-color: var(--accent); }
+.choice b { display: block; }
+.choice small { display: block; color: var(--dim); text-wrap: pretty; }
+#custom { margin-top: .6rem; font-size: .88rem; }
+#custom[hidden] { display: none; }
+#custom summary { cursor: pointer; color: var(--dim); }
+#custom summary:hover { color: var(--text); }
+#flags { padding: 0 .2rem; }
+#flags h4 { margin: .8rem 0 .2rem; font-size: .8rem; color: var(--accent); letter-spacing: .04em; text-transform: uppercase; }
+#flags label { display: grid; grid-template-columns: 1.1rem 1fr; gap: .5rem; align-items: start; padding: .15rem 0; cursor: pointer; }
+#flags input { margin: .3rem 0 0; accent-color: var(--accent); }
+.flagbtns { display: flex; gap: .5rem; margin: .8rem 0 0; }
+
 .hint { display: block; margin-top: 1rem; color: var(--dim); }
 #loader a, .helpbody a { color: var(--accent); }
 .fine { margin: 1rem 0 0; font-size: .85rem; color: var(--dim); text-wrap: pretty; }

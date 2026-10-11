@@ -47,17 +47,42 @@ Wayland/X11 client libraries. `--no-default-features` drops gamepad support (gil
 | `--original`, `--enhanced` | behaviour set (remembered) |
 | `--no-intro`, `--no-credits` | skip the intro movies / the credits after EXIT |
 | `--frame-ticks <n>` | 70 Hz ticks per rendered island frame (default 4) |
+| `--without <names>` | with `--enhanced`: leave these enhancements off (comma-separated field names of `Enhancements`; remembered as `off=` in `PORT.CFG`; an empty list switches all back on) |
+| `--list-enhancements` | print the enhancement names with a one-line description each |
 | `--storage <dir>` | directory for `GAME.STP`, `SAVEGAME.REC`, `SAVEGAME.__n`, `PORT.CFG` |
 | `--demo` | engine demo instead of the game |
 | `--headless` | no window, no audio device: run the game on a simulated 70 Hz clock (see below) |
 | `--dump-frames <dir>` | no window: decode every `.MOV`, write first/middle/last frame as PNG (`--dump-every <n>`: every n-th too) |
 | `--dump-wav <file>` | no window: run headless on a simulated clock and write the mixed audio (`--seconds <n>`, default 30) plus the final picture as PNG |
 
-With `--enhanced` the island uses modern controls (`Enhancements::modern_controls`): the
-mouse turns the duck (the pointer is locked while the island view is up; on the web, click
-the view once), W/S walk, A/D strafe, left mouse button or Space fire, number keys 1–9, 0
-select weapon 1–10 directly, F3/F4 show the quest pictures; the arrows still turn and all
-other keys are as below. The mouse button no longer pauses; P does.
+With `--enhanced` every flag of `pd_game::settings::Enhancements` is on. Besides the bug
+fixes that means:
+
+- **Modern controls** (`modern_controls`): the mouse turns the duck (the pointer is locked
+  while the island view is up; on the web, click the view once), W/S walk, A/D strafe, left
+  mouse button or Space fire, number keys 1–9, 0 select weapon 1–10 directly, E or Enter
+  toggles the jetpack, F3/F4 show the quest pictures; the arrows still turn and all other
+  keys are as below. The mouse button no longer pauses; P does. OPTIONS, CONTROLLER OPTIONS
+  gains MOUSE SPEED (16 steps, a factor 1.25 each), stored as `mouse=` in `PORT.CFG`.
+- **Smooth view** (`smooth_view`): the island view is drawn for every frame the frontend
+  shows, between the last two simulation frames, and mouse turning shows at once. The
+  simulation keeps its timing (`--frame-ticks`); monsters and pickups are moved between
+  their two known positions where they can be matched.
+- **Far view** (`far_view`): the ground window is 60 cells to each side instead of 15, the
+  fog moves out in proportion, and scenery, pickups and quest items are drawn that far.
+  Monsters still wake up 6000 units from the duck, as in the original.
+- **Safe spawn** (`safe_spawn`): for five seconds after the duck appears (island start,
+  lost life, CONTINUE) the monsters ignore it; firing ends the truce at once.
+- **Minimap** (`minimap`): the explored surroundings from `CARTE0n.RON` at the top right of
+  the view, with the map screen's markers.
+- **Confirm to dismiss** (`confirm_to_dismiss`): pictures, dialogue and the map stay until
+  Space, Enter, Tab or the left mouse button goes down; movement keys no longer end them.
+- **Menus** (`menu_mouse`, `menu_wasd_space`, `menu_esc_resumes`): pointing selects, the
+  left button chooses (on a slider its left half lowers, its right half raises), the right
+  button is Esc; a click ends pictures and dialogue; the shop's hand follows the pointer.
+  W/S/A/D act as the arrows and Space as Enter, except while naming a save; the
+  level-select phrase is still typed as before. Esc in the main menu returns to the game in
+  progress.
 
 Keys (the original's, `docs/re/engine/input.md`): arrows (or WASD) move, Ctrl strafe,
 Space fire, Enter jetpack / confirm, Backspace next weapon, Tab map, Home…Del inventory,
@@ -134,7 +159,7 @@ memory (about 127 MB).
   `requestAnimationFrame`, so sound pauses there and resynchronises on return.
 - **Input**: `KeyboardEvent.code` through the same binding table as native
   (`pd_engine::input::Button::from_key_code`), Gamepad API (standard mapping), pointer
-  events. Alt+Enter, the button or a double click toggle fullscreen. Ctrl is the action
+  events. Alt+Enter or the button toggle fullscreen. Ctrl is the action
   key: Ctrl+arrows work, but shortcuts a page cannot intercept (Ctrl+W, Ctrl+T, Ctrl+N)
   still act, so use the arrow keys rather than WASD in the browser.
 - **Text keys**: every key is also passed on as the original's scancode
@@ -206,3 +231,6 @@ git push origin v1.0.0
 
 The release carries `punky-duck-<tag>-linux-x86_64.tar.gz` (the `pd-native` binary) and
 `punky-duck-<tag>-web.zip` (the static page: unpack it on any static file host).
+`web/package.sh <out.zip>` makes that zip from a local build; it stamps the page's file
+references with a hash of the build so that a host or browser cannot serve a new page with
+an old stylesheet or module.

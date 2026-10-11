@@ -77,9 +77,11 @@ pub struct Player {
 impl Player {
     /// `bin` and `cue` are the contents of the user's disc image files.
     /// `mode` is `"original"`, `"enhanced"` or `""` (keep the remembered
-    /// choice); `demo` runs the engine demo instead of the game.
+    /// choice); `off` lists the enhancements to leave out, by name and
+    /// separated by commas (see [`enhancement_list`]), and is remembered too;
+    /// `demo` runs the engine demo instead of the game.
     #[wasm_bindgen(constructor)]
-    pub fn new(bin: Vec<u8>, cue: &str, mode: &str, demo: bool) -> Result<Player, JsError> {
+    pub fn new(bin: Vec<u8>, cue: &str, mode: &str, off: &str, demo: bool) -> Result<Player, JsError> {
         let disc = Rc::new(Disc::new(bin, cue).map_err(|e| JsError::new(&e.to_string()))?);
         let assets = DiscAssets::new(disc.clone());
         if !demo {
@@ -87,6 +89,10 @@ impl Player {
             // formats; the original/enhanced choice next to them in PORT.CFG.
             let mut game_storage = WebStorage::new();
             let mode = Mode::select(Mode::parse(mode), &mut game_storage);
+            if mode == Mode::Enhanced {
+                pd_game::app::store::store_disabled_flags(&mut game_storage, off);
+            }
+            let enh = mode.stored_enhancements(&game_storage);
             let opts = GameOptions { mode, ..GameOptions::default() };
             let mut info = format!(
                 "disc \"{}\": {} files, audio tracks {:?}; {} mode",
@@ -95,7 +101,7 @@ impl Player {
                 disc.audio_track_numbers(),
                 mode.name()
             );
-            let game = Game::new(Box::new(assets), Box::new(game_storage), opts);
+            let game = Game::with_enhancements(Box::new(assets), Box::new(game_storage), opts, enh);
             for e in game.errors() {
                 info.push_str("\nerror: ");
                 info.push_str(e);
@@ -248,6 +254,18 @@ impl Player {
 #[wasm_bindgen]
 pub fn stored_mode() -> String {
     Mode::load(&WebStorage::new()).name().to_string()
+}
+
+/// The enhancements one per line as `name<TAB>group<TAB>description<TAB>on`,
+/// `on` being `1` unless the user switched that one off before.
+#[wasm_bindgen]
+pub fn enhancement_list() -> String {
+    let off = pd_game::app::store::disabled_flags(&WebStorage::new());
+    pd_game::settings::FLAGS
+        .iter()
+        .map(|(name, group, text)| format!("{name}\t{group}\t{text}\t{}", u8::from(!off.iter().any(|o| o == name))))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Framebuffer geometry and audio format for the page.

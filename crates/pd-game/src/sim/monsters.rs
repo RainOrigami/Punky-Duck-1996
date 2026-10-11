@@ -260,6 +260,7 @@ impl Sim {
         }
 
         // Pass 2.
+        let truce = self.grace > 0;
         for i in active {
             let m = &mut self.s.monsters[i];
             m.prev_x = m.x;
@@ -273,6 +274,9 @@ impl Sim {
             let hx = (m.home_x.wrapping_sub(m.x)) as f64;
             let d2h = ((hz * hz + hx * hx) / 1000.0) as f32;
             let dist = ((d2 as f64 * 1000.0).sqrt()) as f32;
+            // During the truce of `safe_spawn` the monsters act as if the duck were
+            // out of every range; shots already in flight carry on.
+            let d2 = if truce { f32::MAX } else { d2 };
             match m.ai {
                 0 => {
                     if (m.detect as f32) <= d2 {

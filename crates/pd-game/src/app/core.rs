@@ -17,6 +17,7 @@ use super::gfx::{self, Fade, FontState, Pal, Sheet, Video};
 use super::keys::{BiosKey, Keyboard};
 use super::sound::Sound;
 use super::store::Settings;
+use crate::settings::Enhancements;
 
 /// A decoded `.RON` picture with the palette as `load_ron` (`0x2b5f0`)
 /// leaves it: components shifted down to 6 bits.
@@ -125,6 +126,11 @@ pub struct Core {
     pub cd_playing: bool,
     /// Relative mouse movement not yet consumed (modern controls).
     pub mouse_dx: f32,
+    /// The original/enhanced switch, for the parts of the flow that differ.
+    pub enh: Enhancements,
+    /// Mouse buttons that went down and no 2D screen has acted on yet
+    /// (`Enhancements::menu_mouse`): left, right.
+    pub clicks: (bool, bool),
     /// Result of the last [`Op::WaitKey`].
     pub last_key: BiosKey,
 
@@ -170,6 +176,8 @@ impl Core {
             prev_input: Input::default(),
             cd_playing: false,
             mouse_dx: 0.0,
+            enh: Enhancements::original(),
+            clicks: (false, false),
             last_key: BiosKey::default(),
             banque,
             picture,
@@ -329,6 +337,27 @@ impl Core {
             || (i.cancel && !p.cancel)
             || (i.key1 && !p.key1)
             || (i.key2 && !p.key2)
+            || (self.enh.menu_mouse && i.mouse_left && !p.mouse_left)
+    }
+
+    /// What ends a picture, a dialogue or the map: `input_any`, or with
+    /// `Enhancements::confirm_to_dismiss` only Space, Enter, Tab or the left
+    /// mouse button going down.
+    fn dismiss_input(&self) -> bool {
+        if !self.enh.confirm_to_dismiss {
+            return self.input_any();
+        }
+        let (i, p) = (&self.input, &self.prev_input);
+        (i.secondary && !p.secondary)
+            || (i.item && !p.item)
+            || (i.inventory && !p.inventory)
+            || (i.mouse_left && !p.mouse_left)
+    }
+
+    /// Once per tick: remember mouse buttons going down for the 2D screens.
+    pub fn latch_clicks(&mut self) {
+        self.clicks.0 |= self.input.mouse_left && !self.prev_input.mouse_left;
+        self.clicks.1 |= self.input.mouse_right && !self.prev_input.mouse_right;
     }
 
     /// Advance the queue by one tick. Returns `true` while something is
@@ -369,12 +398,17 @@ impl Core {
                         self.last_key = k;
                         self.ops.pop_front();
                     }
+                    None if self.enh.menu_mouse && self.clicks.0 => {
+                        self.clicks.0 = false;
+                        self.last_key = BiosKey { ascii: 0x0d, scan: 0x1c };
+                        self.ops.pop_front();
+                    }
                     None => return true,
                 },
                 Op::WaitInput { released } => {
                     let any = {
                         let released = *released;
-                        let any = self.input_any();
+                        let any = self.dismiss_input();
                         if !released && any {
                             if let Some(Op::WaitInput { released }) = self.ops.front_mut() {
                                 *released = true;

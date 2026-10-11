@@ -41,7 +41,7 @@ jobs:
           mkdir -p "dist/${name}-linux-x86_64"
           cp target/release/pd-native README.md LICENSE "dist/${name}-linux-x86_64/"
           tar -C dist -czf "dist/${name}-linux-x86_64.tar.gz" "${name}-linux-x86_64"
-          (cd web && zip -9 -X "../dist/${name}-web.zip" index.html style.css main.js pkg/pd_web.js pkg/pd_web_bg.wasm)
+          web/package.sh "dist/${name}-web.zip"
 
       - name: Publish release
         env:

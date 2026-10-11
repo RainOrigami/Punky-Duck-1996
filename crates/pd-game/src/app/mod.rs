@@ -83,9 +83,22 @@ pub struct Game {
 
 impl Game {
     pub fn new(assets: Box<dyn AssetSource>, storage: Box<dyn Storage>, opts: GameOptions) -> Self {
-        let world = World::new(opts.mode.enhancements(), opts.frame_ticks);
+        let enh = opts.mode.enhancements();
+        Self::with_enhancements(assets, storage, opts, enh)
+    }
+
+    /// Like [`Game::new`] with a chosen set of flags instead of the mode's own.
+    pub fn with_enhancements(
+        assets: Box<dyn AssetSource>,
+        storage: Box<dyn Storage>,
+        opts: GameOptions,
+        enh: crate::settings::Enhancements,
+    ) -> Self {
+        let world = World::new(enh.clone(), opts.frame_ticks);
+        let mut core = Core::new(assets, storage);
+        core.enh = enh;
         Self {
-            core: Core::new(assets, storage),
+            core,
             opts,
             step: FixedStep::original(),
             stage: Stage::Boot,
@@ -148,6 +161,7 @@ impl Game {
         core.settings.load(core.storage.as_ref(), core.assets.as_ref());
         core.kbd.set_bios(true);
         core.kbd.flush();
+        core.clicks = (false, false);
         core.apply_sound();
         core.cd_stop();
         if core.settings.stp.music_on != 0 {
@@ -179,6 +193,7 @@ impl Game {
         let core = &mut self.core;
         core.kbd.set_bios(true);
         core.kbd.flush();
+        core.clicks = (false, false);
         if !self.globals.player_mode {
             self.globals.in_progress = false;
             self.world.sim.s.p.lives = -1;
@@ -225,6 +240,7 @@ impl Game {
         self.core.ticks += 1;
         let input = self.core.input;
         self.core.kbd.tick(&input);
+        self.core.latch_clicks();
         if let Stage::Island = self.stage {
             // The island loop keeps its own tick count while waits run.
             let busy = self.core.run_ops();
@@ -253,7 +269,12 @@ impl Game {
                     let pal = menu.bg.pal;
                     self.core.fade(0x10, &pal, &BLACK);
                     // settings_save (0x25a40)
-                    self.core.then(|core| core.settings.save_stp(core.storage.as_mut()));
+                    self.core.then(|core| {
+                        core.settings.save_stp(core.storage.as_mut());
+                        if core.enh.modern_controls {
+                            core.settings.save_port(core.storage.as_mut());
+                        }
+                    });
                     self.stage = Stage::MenuClosed(menu.out);
                 } else {
                     self.stage = Stage::Menu(menu);
@@ -375,6 +396,9 @@ impl App for Game {
     }
 
     fn render(&mut self, fb: &mut Framebuffer) {
+        if let Stage::Island = self.stage {
+            self.world.render_smooth(&mut self.core, self.step.phase());
+        }
         self.core.video.show(fb);
     }
 
@@ -387,7 +411,7 @@ impl App for Game {
     }
 
     fn mouse_motion(&mut self, dx: f32, _dy: f32) {
-        if self.wants_pointer_lock() {
+        if matches!(self.stage, Stage::Island) && self.world.wants_turn() {
             self.core.mouse_dx += dx;
         }
     }

@@ -134,19 +134,23 @@ impl Sim {
                     ltz = chop(ltz as f64 - vf * s);
                     p.move_dir = 1;
                 }
-                if strafing && p.zone != 1 {
+                // Original: no strafing over shallow water (zone 1), on foot or flying.
+                let water = p.zone == 1;
+                if strafing && (!water || self.enh.strafe_in_water) {
                     p.angle = (p.angle as f64 + STRAFE_TURN) as f32;
                     let a2 = p.angle as f64;
                     let (s2, c2) = (a2.sin(), a2.cos());
                     if strafe_l {
                         ltx = chop(vf * 0.5 * c2 + ltx as f64);
                         ltz = chop(s2 * (vf * 0.8) + ltz as f64);
-                        p.strafe = 1;
+                        // In the water the duck keeps its wading sprites.
+                        p.strafe = if water { 0 } else { 1 };
                     }
                     if strafe_r {
                         ltx = chop(ltx as f64 - vf * 0.5 * c2);
                         ltz = chop(ltz as f64 - s2 * (vf * 0.8));
-                        p.strafe = 2;
+                        // In the water the duck keeps its wading sprites.
+                        p.strafe = if water { 0 } else { 2 };
                     }
                     p.angle = (p.angle as f64 - STRAFE_TURN) as f32;
                 }
@@ -300,6 +304,8 @@ impl Sim {
             s.shots.next = (s.shots.next + 1) % SHOTS as i32;
             p.fire_ctr = 0;
             p.shooting = 2;
+            // Shooting ends the truce of `safe_spawn`.
+            self.grace = 0;
         }
 
         // Flight. (The original loop runs one slot past the pool; that slot aliases
@@ -400,6 +406,7 @@ impl Sim {
         self.sprite(0x2d, Bank::Duck, 0, mx, 0, mz, -999.0);
 
         let p = &mut self.s.p;
+        let mut respawned = false;
         let mut frame: Option<i32> = None;
         if p.dead != 0 {
             p.energy = 0;
@@ -424,6 +431,7 @@ impl Sim {
                 p.tx = p.start_x;
                 p.tz = p.start_z;
                 p.lives -= 1;
+                respawned = true;
                 self.events.push(Event::FadeIn);
                 self.events.push(Event::CdTrack(5));
             }
@@ -453,6 +461,9 @@ impl Sim {
             p.shooting -= 1;
         }
         p.bump = 0;
+        if respawned {
+            self.start_grace();
+        }
         if let Some(f) = frame {
             self.sprite(f, Bank::Duck, 0, wx, py, wz, -1.0);
         }

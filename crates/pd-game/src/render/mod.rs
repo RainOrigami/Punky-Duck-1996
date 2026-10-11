@@ -49,6 +49,38 @@ pub const MAX_SPRITES: usize = 99;
 /// Sprites and objects farther than this from the camera position in x or z
 /// are dropped when queued (`0x1194`, `0x138f0` / `0x14050`).
 pub const QUEUE_RANGE: i32 = 4500;
+/// How far the view reaches. The original's values are compiled in
+/// ([`Reach::ORIGINAL`]); `Enhancements::far_view` widens them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Reach {
+    /// Half the side of the ground vertex window in cells (`0x126e8`).
+    pub half: i32,
+    /// Far limit of ground and sprites in depth units (`0x40034`).
+    pub fog_far: i32,
+    /// Depth range of the fog before the far limit (`0x40030`).
+    pub fog_range: i32,
+    /// Sprites queued per frame at most (`0x138fc`).
+    pub max_sprites: usize,
+}
+
+impl Reach {
+    pub const ORIGINAL: Reach =
+        Reach { half: 15, fog_far: FOG_FAR, fog_range: FOG_RANGE, max_sprites: MAX_SPRITES };
+
+    /// A window of `half` cells to each side with the fog in the original's
+    /// proportions. Depths are 16-bit in the renderer, so at most 90.
+    pub fn cells(half: i32) -> Reach {
+        let half = half.clamp(15, 90);
+        Reach { half, fog_far: FOG_FAR * half / 15, fog_range: FOG_RANGE * half / 15, max_sprites: 2000 }
+    }
+
+    /// Sprites and objects farther than this from the camera in x or z are
+    /// not queued (`0x1194`): the edge of the ground window.
+    pub fn queue_range(&self) -> i32 {
+        self.half * CELL
+    }
+}
+
 /// Border colour the original fills the screen with at a mode switch.
 pub const BORDER_COLOUR: u8 = 0xfe;
 /// Colour of the haze band between sky picture and ground (`sky_draw`).
