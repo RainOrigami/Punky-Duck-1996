@@ -1,0 +1,9 @@
+/target
+/CLAUDE.md
+/disc/
+*.bin
+*.cue
+*.iso
+/web/pkg/
+/web/dist/
+/out/

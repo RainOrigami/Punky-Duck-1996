@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Punky Duck</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="stage">
+  <canvas id="screen" width="640" height="480" hidden></canvas>
+
+  <section id="loader">
+    <h1>Punky Duck</h1>
+    <p class="lede">Bring your own disc. Select or drop the <code>.bin</code> and <code>.cue</code>
+      of your original 1996 CD image.</p>
+    <p class="fine">No disc at hand? The CD image is archived at the Internet Archive:
+      <a href="https://archive.org/details/punky-duck" target="_blank" rel="noopener">archive.org/details/punky-duck</a>.
+      Download the <code>.bin</code> and <code>.cue</code> from there, then drop them here.</p>
+    <label id="drop" for="files">
+      <span class="slots">
+        <span class="slot" id="slot-bin" data-ext=".bin">no .bin yet</span>
+        <span class="slot" id="slot-cue" data-ext=".cue">no .cue yet</span>
+      </span>
+      <span class="hint">Drop both files here, or click to choose</span>
+      <input id="files" type="file" multiple accept=".bin,.cue,.BIN,.CUE">
+    </label>
+    <p class="fine"><label>Version:
+      <select id="mode">
+        <option value="original">Original (as released, bugs included)</option>
+        <option value="enhanced">Enhanced (fixes and improvements)</option>
+      </select></label></p>
+    <p class="fine"><button class="helpbtn" type="button" data-help>Controls, options and cheats</button></p>
+    <p class="fine">The files are read in this tab and never leave your computer. The image
+      (about 127&nbsp;MB) is held in memory while the page is open.</p>
+    <p id="message" role="status" aria-live="polite"></p>
+  </section>
+
+  <button id="start" type="button" hidden>Click or press a key to start</button>
+</main>
+
+<footer id="bar" hidden>
+  <span id="status"></span>
+  <span class="keys" id="keys"></span>
+  <button class="helpbtn" type="button" data-help>Help</button>
+  <label class="opt"><input id="integer" type="checkbox"> integer scale</label>
+  <button id="fullscreen" type="button" title="Alt+Enter">Fullscreen</button>
+</footer>
+
+<dialog id="help" aria-labelledby="help-title">
+  <form method="dialog" class="helphead">
+    <h2 id="help-title">Punky Duck: controls, options and cheats</h2>
+    <button type="submit" aria-label="Close help">Close</button>
+  </form>
+  <div class="helpbody">
+
+  <h3>Versions</h3>
+  <p>Choose the version before loading the disc. The choice is remembered.</p>
+  <dl>
+    <dt>Original</dt>
+    <dd>Behaves like the 1996 DOS release, bugs included. As on the original disc, finishing
+      the first island plays the ending; the other four islands are reached with the level
+      select cheat below or from a saved game.</dd>
+    <dt>Enhanced</dt>
+    <dd>Modern controls (mouse look, WASD with strafing, fire on the left mouse button, number
+      keys for weapons) and fixes for the original's bugs: finishing island 1 leads on to
+      island 2, the compass survives loading and resuming, monsters keep to their patrol
+      paths, hits are scored by the weapon that fired, spent shots stop hurting monsters, a
+      death costs one life instead of sometimes two, the fifth teleporter pad on islands 3 and
+      4 works, and the full picture is shown.</dd>
+  </dl>
+
+  <h3>Controls on the islands</h3>
+  <table>
+    <thead><tr><th>Action</th><th>Original</th><th>Enhanced</th></tr></thead>
+    <tbody>
+      <tr><td>Walk forward / back</td><td><kbd>Up</kbd> <kbd>Down</kbd> or <kbd>W</kbd> <kbd>S</kbd></td><td><kbd>W</kbd> <kbd>S</kbd> or <kbd>Up</kbd> <kbd>Down</kbd></td></tr>
+      <tr><td>Turn</td><td><kbd>Left</kbd> <kbd>Right</kbd> or <kbd>A</kbd> <kbd>D</kbd></td><td>Mouse, or <kbd>Left</kbd> <kbd>Right</kbd></td></tr>
+      <tr><td>Strafe</td><td>Hold <kbd>Ctrl</kbd> and turn</td><td><kbd>A</kbd> <kbd>D</kbd></td></tr>
+      <tr><td>Fire</td><td><kbd>Space</kbd></td><td>Left mouse button or <kbd>Space</kbd></td></tr>
+      <tr><td>Choose weapon</td><td><kbd>Backspace</kbd> (next)</td><td><kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd> directly, or <kbd>Backspace</kbd> (next)</td></tr>
+      <tr><td>Jetpack on / off</td><td><kbd>Enter</kbd></td><td><kbd>Enter</kbd></td></tr>
+      <tr><td>Map</td><td><kbd>Tab</kbd></td><td><kbd>Tab</kbd></td></tr>
+      <tr><td>Inventory</td><td><kbd>Home</kbd>, <kbd>End</kbd>, <kbd>PgUp</kbd>, <kbd>PgDn</kbd>, <kbd>Ins</kbd> or <kbd>Del</kbd></td><td>same</td></tr>
+      <tr><td>Quest pictures</td><td><kbd>1</kbd> <kbd>2</kbd></td><td><kbd>F3</kbd> <kbd>F4</kbd></td></tr>
+      <tr><td>Pause</td><td><kbd>P</kbd> or a mouse click</td><td><kbd>P</kbd></td></tr>
+      <tr><td>View size</td><td><kbd>F1</kbd></td><td><kbd>F1</kbd></td></tr>
+      <tr><td>Fast mode (interlace)</td><td><kbd>F2</kbd></td><td><kbd>F2</kbd></td></tr>
+      <tr><td>Game menu (save, load, options)</td><td><kbd>Esc</kbd></td><td><kbd>Esc</kbd></td></tr>
+    </tbody>
+  </table>
+  <p>In the enhanced version, click the picture once to let the mouse steer; the pointer is
+    released again in menus and other screens, or with the browser's <kbd>Esc</kbd>.</p>
+  <p>The map fills in as you explore. Your heading is only shown once you have found the
+    compass.</p>
+
+  <h3>Menus, shop and other screens</h3>
+  <table>
+    <tbody>
+      <tr><td>Move, choose</td><td><kbd>Up</kbd> <kbd>Down</kbd>, <kbd>Enter</kbd></td></tr>
+      <tr><td>Change a slider</td><td><kbd>Left</kbd> <kbd>Right</kbd></td></tr>
+      <tr><td>Back (picks the last entry)</td><td><kbd>Esc</kbd></td></tr>
+      <tr><td>Name a saved game</td><td>Type it, then <kbd>Enter</kbd></td></tr>
+      <tr><td>Shop</td><td>Move the hand with the arrow keys, pick with <kbd>Space</kbd></td></tr>
+      <tr><td>Skip the intro movies</td><td>Any key</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Options in the game's menu</h3>
+  <table>
+    <tbody>
+      <tr><td>Difficulty</td><td>Easy, medium, hard</td></tr>
+      <tr><td>Language</td><td>French, English, Spanish, German, Polish</td></tr>
+      <tr><td>Game speed</td><td>−6 to +6</td></tr>
+      <tr><td>Resolution</td><td>VGA 320×200, SVGA 320×200, SVGA 640×400; fast mode on / off</td></tr>
+      <tr><td>Sound</td><td>Sound effects and music on / off, a volume for each</td></tr>
+      <tr><td>Controller</td><td>Keyboard or joystick</td></tr>
+    </tbody>
+  </table>
+  <p>Options and saved games are kept in this browser's storage. They use the DOS game's own
+    file formats.</p>
+
+  <h3>Options on this page</h3>
+  <table>
+    <tbody>
+      <tr><td>Help</td><td>The Help button in the bar opens this panel; the game waits while it is open</td></tr>
+      <tr><td>Fullscreen</td><td>The button in the bar, or <kbd>Alt</kbd>+<kbd>Enter</kbd></td></tr>
+      <tr><td>Integer scale</td><td>Scales the picture by whole numbers only, for even pixels</td></tr>
+      <tr><td>Gamepad</td><td>Experimental: D-pad or left stick moves; buttons follow the standard layout</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Cheats</h3>
+  <p>These are the original game's own cheats and work in both versions.</p>
+  <h4>Level select (the cheat menu)</h4>
+  <ol>
+    <li>Open any menu, for example the main menu.</li>
+    <li>Type <kbd>THE TRUTH IS OUT THERE</kbd> in capital letters, with the spaces (hold
+      <kbd>Shift</kbd> or turn on <kbd>Caps Lock</kbd>). The screen flashes red.</li>
+    <li>Choose <b>NEW GAME</b>. It now opens the <b>CHEAT MODE</b> menu, where you pick the island to
+      start on: Fisher, Oasis, Yeti, Cold or Smoke Island.</li>
+  </ol>
+  <h4>Cheats while playing</h4>
+  <p>Each cheat is three keys held together, with no other key down. First hold
+    <kbd>H</kbd> <kbd>C</kbd> <kbd>T</kbd> once to switch the cheats on. A cheat, once given,
+    stays in force until you reload the page. The screen flashes red each time one is accepted.</p>
+  <table>
+    <thead><tr><th>Hold</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td><kbd>L</kbd> <kbd>I</kbd> <kbd>F</kbd></td><td>Lives stay at 3</td></tr>
+      <tr><td><kbd>N</kbd> <kbd>R</kbd> <kbd>J</kbd></td><td>Energy stays at 99</td></tr>
+      <tr><td><kbd>J</kbd> <kbd>E</kbd> <kbd>T</kbd></td><td>Jetpack fuel stays full</td></tr>
+      <tr><td><kbd>B</kbd> <kbd>O</kbd> <kbd>U</kbd></td><td>Compass</td></tr>
+      <tr><td><kbd>F</kbd> <kbd>R</kbd> <kbd>C</kbd></td><td>Money: 500,000</td></tr>
+      <tr><td><kbd>Q</kbd> <kbd>;</kbd> <kbd>O</kbd></td><td>All weapons with 9,999 shots each</td></tr>
+      <tr><td><kbd>F</kbd> <kbd>R</kbd> <kbd>A</kbd></td><td>Full shot power</td></tr>
+    </tbody>
+  </table>
+  <p>The keys are given by their position on a US keyboard. The game was written for a French
+    keyboard, where the last two read <kbd>A</kbd> <kbd>M</kbd> <kbd>O</kbd> and
+    <kbd>F</kbd> <kbd>R</kbd> <kbd>Q</kbd>; on other layouts, use the keys in the same places
+    (<kbd>;</kbd> is the key to the right of <kbd>L</kbd>).</p>
+
+  </div>
+</dialog>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>

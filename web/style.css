@@ -1,0 +1,193 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0d12;
+  --panel: #151922;
+  --line: #2a3140;
+  --text: #e8eaf0;
+  --dim: #8d95a6;
+  --accent: #ffb629;
+  --ok: #5fe08a;
+  --bad: #ff6b5e;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, "Segoe UI", sans-serif;
+}
+
+#stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+/* The 640x480 picture; main.js sets the CSS size (letterboxed), the browser
+   scales with nearest-neighbour sampling. */
+#screen {
+  display: block;
+  background: #000;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+#screen[hidden] { display: none; }
+
+#loader {
+  width: min(34rem, 100% - 2rem);
+  text-align: center;
+}
+#loader[hidden] { display: none; }
+
+h1 {
+  margin: 0 0 .25rem;
+  font-size: 2.4rem;
+  letter-spacing: .02em;
+  color: var(--accent);
+  text-wrap: balance;
+}
+
+.lede { margin: 0 0 1.5rem; color: var(--dim); text-wrap: pretty; }
+
+code {
+  font: .92em ui-monospace, "Cascadia Mono", Menlo, monospace;
+  color: var(--text);
+}
+
+#drop {
+  display: block;
+  padding: 1.75rem 1rem 1.25rem;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+#drop:hover, #drop.over, #drop:focus-within { border-color: var(--accent); background: #1a1f2a; }
+#drop input { position: absolute; opacity: 0; pointer-events: none; }
+
+.slots { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
+.slot {
+  flex: 1 1 12rem;
+  padding: .55rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--dim);
+  font: .9em ui-monospace, "Cascadia Mono", Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slot.ready { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+
+.hint { display: block; margin-top: 1rem; color: var(--dim); }
+#loader a, .helpbody a { color: var(--accent); }
+.fine { margin: 1rem 0 0; font-size: .85rem; color: var(--dim); text-wrap: pretty; }
+
+#message { min-height: 1.5em; margin: .75rem 0 0; white-space: pre-line; }
+#message.error { color: var(--bad); }
+
+#start {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: max-content;
+  height: max-content;
+  padding: .9rem 1.6rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #1b1400;
+  font: 600 1.1rem system-ui, sans-serif;
+  cursor: pointer;
+}
+#start[hidden] { display: none; }
+#start:focus-visible, #fullscreen:focus-visible, .helpbtn:focus-visible, .helphead button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+
+#bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: .4rem .9rem;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--dim);
+  font-size: .82rem;
+}
+#bar[hidden] { display: none; }
+#status { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.keys { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt { white-space: nowrap; cursor: pointer; }
+#fullscreen, .helpbtn, .helphead button {
+  padding: .25rem .7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+#fullscreen:hover, .helpbtn:hover, .helphead button:hover { border-color: var(--accent); }
+
+/* Fullscreen shows only the picture. */
+#stage:fullscreen { background: #000; }
+
+@media (max-width: 720px) {
+  .keys { display: none; }
+  #bar { justify-content: space-between; }
+}
+
+/* Help: controls, options, cheats. */
+#help {
+  width: min(52rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+}
+#help::backdrop { background: rgb(0 0 0 / .6); }
+#help[open] { display: flex; flex-direction: column; }
+.helphead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .8rem 1.2rem;
+  border-bottom: 1px solid var(--line);
+}
+.helphead h2 { margin: 0; font-size: 1.05rem; }
+.helpbody { overflow-y: auto; padding: .2rem 1.2rem 1.2rem; }
+.helpbody h3 { margin: 1.4rem 0 .4rem; font-size: 1rem; color: var(--accent); }
+.helpbody h4 { margin: 1rem 0 .3rem; font-size: .92rem; }
+.helpbody p, .helpbody ol, .helpbody dl { margin: .4rem 0; max-width: 70ch; text-wrap: pretty; }
+.helpbody dt { font-weight: 600; margin-top: .5rem; }
+.helpbody dd { margin: 0; color: var(--dim); }
+.helpbody table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.helpbody th, .helpbody td { padding: .3rem .6rem .3rem 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.helpbody th { color: var(--dim); font-weight: 500; }
+.helpbody td:first-child { white-space: nowrap; }
+kbd {
+  display: inline-block;
+  padding: 0 .35em;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg);
+  font: .85em ui-monospace, monospace;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .helpbody td:first-child { white-space: normal; }
+}

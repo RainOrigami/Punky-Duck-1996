@@ -1,0 +1,21 @@
+[package]
+name = "pd-native"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["gamepad"]
+gamepad = ["dep:gilrs"]
+
+[dependencies]
+pd-formats.workspace = true
+pd-engine.workspace = true
+pd-game.workspace = true
+winit = "0.30"
+pixels = "0.17"
+# "pulseaudio" adds a pure-Rust PulseAudio client (served by pipewire-pulse);
+# cpal prefers it over raw ALSA when a server is running.
+cpal = { version = "0.18", features = ["pulseaudio"] }
+png = "0.18"
+gilrs = { version = "0.11", optional = true }

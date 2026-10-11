@@ -1,0 +1,11 @@
+[package]
+name = "pd-extract"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pd-formats.workspace = true
+pd-engine.workspace = true
+pd-game.workspace = true
+png = "0.18"

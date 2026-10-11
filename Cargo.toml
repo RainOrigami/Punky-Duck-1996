@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pd-formats",
+    "crates/pd-engine",
+    "crates/pd-game",
+    "crates/pd-extract",
+    "crates/pd-native",
+    "crates/pd-web",
+    "tools/le2elf",
+]
+
+[workspace.package]
+edition = "2024"
+license = "Unlicense"
+
+[workspace.dependencies]
+pd-formats = { path = "crates/pd-formats" }
+pd-engine = { path = "crates/pd-engine" }
+pd-game = { path = "crates/pd-game" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"

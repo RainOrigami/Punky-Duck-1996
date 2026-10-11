@@ -1,0 +1,20 @@
+[package]
+name = "pd-web"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pd-formats.workspace = true
+pd-engine.workspace = true
+pd-game.workspace = true
+
+# Browser-only; on other targets the crate is empty so the workspace still builds.
+# Keep the wasm-bindgen version equal to the wasm-bindgen-cli that web/build.sh uses.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.129"
+web-sys = { version = "0.3.106", features = ["Window", "Storage"] }
+console_error_panic_hook = "0.1.7"
