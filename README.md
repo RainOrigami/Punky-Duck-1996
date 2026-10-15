@@ -2,9 +2,9 @@
 
 # Punky Duck (1996), rebuilt
 
-### [▶ Play in your browser](https://punky-duck.staticdomains.app/)
+### [▶ Play in your browser](https://rainorigami.github.io/Punky-Duck-1996/)
 
-**https://punky-duck.staticdomains.app/**
+**https://rainorigami.github.io/Punky-Duck-1996/**
 
 A from-scratch engine for Condor Software's 1996 DOS game *Punky Duck*, written in Rust.
 Runs natively on Linux and in the browser, using the data from the original CD.
@@ -19,7 +19,7 @@ The game data is not part of this project. You need the original CD image as a `
 `.cue` pair. An image is archived at the Internet Archive:
 [archive.org/details/punky-duck](https://archive.org/details/punky-duck).
 
-**In the browser:** open the [play page](https://punky-duck.staticdomains.app/), drop the
+**In the browser:** open the [play page](https://rainorigami.github.io/Punky-Duck-1996/), drop the
 `.bin` and `.cue` on it, and start. The files are read in your browser tab and are not
 uploaded anywhere. The page has a Help button listing every control, option and cheat.
 
